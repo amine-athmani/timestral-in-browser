@@ -42,6 +42,21 @@
   ]
  },
  {
+  "id": "languages",
+  "horizon": 28,
+  "title": "Language articles",
+  "freq": "Daily, 6 series",
+  "blurb": "Daily views of six programming language articles on the English Wikipedia, one row per day and article. Pick a series, or forecast all six and compare them.",
+  "source": "Wikimedia Pageviews API",
+  "source_url": "https://wikimedia.org/api/rest_v1/",
+  "license": "CC0",
+  "group": "Article",
+  "targets": [
+   "Daily views"
+  ],
+  "covariates": []
+ },
+ {
   "id": "weather",
   "horizon": 72,
   "targets": [

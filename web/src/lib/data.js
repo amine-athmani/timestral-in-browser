@@ -1,4 +1,5 @@
-// CSV loading for the workbench: delimiter and decimal comma, the time column, and rows in time order.
+// CSV loading for the workbench: delimiter and decimal comma, the time column, the series of a long table,
+// and rows in time order.
 // No DOM here, so it runs in Node tests (web/test/).
 import Papa from "papaparse";
 
@@ -52,24 +53,32 @@ function isYears(name, values) {
   return /^(year|yr|years|année|annee|año|jahr)$/i.test(name.trim()) || sorted.every((v, i) => !i || v - sorted[i - 1] === 1);
 }
 
-/**
- * Parse a CSV into numeric columns and, when there is a time column, rows sorted by time.
- * Returns { fields, rows, timeCol, times, notes }: rows hold numbers or null, times are unix seconds or null,
- * notes are short remarks for the user (reordered rows, dropped rows, uneven steps).
- */
-export function parseTable(text) {
+/** Parse CSV text into its header and raw rows: { fields, data, delimiter }. */
+export function readCSV(text) {
   const { data, meta } = Papa.parse(String(text).replace(/^﻿/, ""), { header: true, skipEmptyLines: "greedy" });
   const fields = (meta.fields ?? []).filter((f) => f && f.trim());
   if (!data.length || !fields.length) throw new Error("This file has no rows or no header row.");
-  const filled = (f) => data.map((r) => r[f]).filter((v) => v != null && String(v).trim() !== "");
-  const share = (vals, test) => (vals.length ? vals.filter(test).length / vals.length : 0);
+  return { fields, data, delimiter: meta.delimiter };
+}
+
+const isBlank = (v) => v == null || String(v).trim() === "";
+const share = (vals, test) => (vals.length ? vals.filter(test).length / vals.length : 0);
+
+/**
+ * Work out what each column of a parsed CSV holds, over the whole file.
+ * Returns { numeric, decimal, timeCol, times, groups }: the numeric columns to forecast and their decimal marks,
+ * the time column and each raw row's time (unix seconds, NaN when invalid), and the text columns that name the
+ * series of a long table (one row per time and series, like sales by store).
+ */
+export function inspect({ fields, data, delimiter }) {
+  const filled = (f) => data.map((r) => r[f]).filter((v) => !isBlank(v));
 
   // A decimal comma is only possible when commas do not separate the fields.
   const decimal = {};
   const numeric = fields.filter((f) => {
     const vals = filled(f);
     if (share(vals, (v) => parseNumber(v) != null) >= 0.8) return (decimal[f] = ".");
-    if (meta.delimiter !== "," && share(vals, (v) => parseNumber(v, ",") != null) >= 0.8) return (decimal[f] = ",");
+    if (delimiter !== "," && share(vals, (v) => parseNumber(v, ",") != null) >= 0.8) return (decimal[f] = ",");
     return false;
   });
 
@@ -90,14 +99,46 @@ export function parseTable(text) {
       return y == null ? NaN : Date.UTC(y, 0, 1) / 1000;
     });
   }
-  const columns = numeric.filter((f) => f !== timeCol);
-  if (!columns.length) throw new Error("This file has no numeric columns.");
+  const groups = fields.filter((f) => !numeric.includes(f) && f !== timeCol && isGroupColumn(data, f, times));
+  return { numeric: numeric.filter((f) => f !== timeCol), decimal, timeCol, times, groups };
+}
 
+/**
+ * Whether a text column names the series of a long table: 2 to 1,000 names with at least 8 rows each, and either
+ * the times repeat across names but not within one, or (without a time column) each name's rows come in one block.
+ */
+function isGroupColumn(data, f, times) {
+  const keys = data.map((r) => String(r[f] ?? "").trim());
+  if (share(keys, Boolean) < 0.9) return false;
+  const names = new Set(keys.filter(Boolean));
+  if (names.size < 2 || names.size > 1000 || data.length / names.size < 8) return false;
+  if (times) {
+    const valid = keys.map((k, i) => [k, times[i]]).filter(([k, t]) => k && Number.isFinite(t));
+    const pairs = new Set(valid.map(([k, t]) => `${k}\u0000${t}`)).size;
+    return new Set(valid.map(([, t]) => t)).size <= valid.length * 0.6 && pairs >= valid.length * 0.99;
+  }
+  const blocks = keys.filter((k, i) => k && k !== keys[i - 1]).length;
+  return blocks === names.size;
+}
+
+/** The names in a group column, in the order they first appear. */
+export const groupKeys = ({ data }, f) => [...new Set(data.map((r) => String(r[f] ?? "").trim()).filter(Boolean))];
+
+/**
+ * One series of a parsed CSV: the rows where `group` is `key` (every row when `group` is null), sorted by time.
+ * Returns { fields, rows, timeCol, times, notes }: rows hold numbers or null, times are unix seconds or null,
+ * notes are short remarks for the user (reordered rows, dropped rows, uneven steps).
+ */
+export function buildTable({ data }, { numeric, decimal, timeCol, times }, group = null, key = null) {
+  if (!numeric.length) throw new Error("This file has no numeric columns.");
   const notes = [];
   let order = data.map((r, i) => i);
+  if (group) order = order.filter((i) => String(data[i][group] ?? "").trim() === key);
+  if (!order.length) throw new Error(`No rows for “${key}”.`);
   if (times) {
+    const all = order.length;
     order = order.filter((i) => Number.isFinite(times[i]));
-    const dropped = data.length - order.length;
+    const dropped = all - order.length;
     if (dropped) notes.push(`${dropped.toLocaleString()} row${dropped > 1 ? "s" : ""} without a valid time left out`);
     if (order.some((i, k) => k && times[i] < times[order[k - 1]])) {
       order.sort((a, b) => times[a] - times[b]);
@@ -112,12 +153,18 @@ export function parseTable(text) {
     if (step && uneven > diffs.length * 0.01) notes.push("uneven time steps, read as evenly spaced");
   }
   return {
-    fields: columns,
-    rows: order.map((i) => Object.fromEntries(columns.map((f) => [f, parseNumber(data[i][f], decimal[f])]))),
+    fields: numeric,
+    rows: order.map((i) => Object.fromEntries(numeric.map((f) => [f, parseNumber(data[i][f], decimal[f])]))),
     timeCol,
     times: times ? order.map((i) => times[i]) : null,
     notes,
   };
+}
+
+/** Parse a CSV into one table: readCSV, inspect and buildTable in one call. */
+export function parseTable(text, group = null, key = null) {
+  const csv = readCSV(text);
+  return buildTable(csv, inspect(csv), group, key);
 }
 
 export function median(values) {

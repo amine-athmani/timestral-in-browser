@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseNumber, parseTime, parseTable, season } from "../src/lib/data.js";
+import { parseNumber, parseTime, parseTable, readCSV, inspect, buildTable, groupKeys, season } from "../src/lib/data.js";
 
 const days = (n) => Array.from({ length: n }, (_, i) => new Date(Date.UTC(2026, 0, 1 + i)));
 
@@ -64,6 +64,25 @@ test("a numeric series in the year range is not mistaken for years", () => {
   const t = parseTable(csv);
   assert.equal(t.timeCol, null);
   assert.deepEqual(t.fields, ["visitors"]);
+});
+
+test("a long table is split into its series", () => {
+  const lines = ["date,store,sales"];
+  for (const store of ["North", "South", "East"]) days(20).forEach((d, i) => lines.push(`${d.toISOString().slice(0, 10)},${store},${i}`));
+  const csv = readCSV(lines.join("\n")), info = inspect(csv);
+  assert.deepEqual(info.groups, ["store"]);
+  assert.deepEqual(info.numeric, ["sales"]);
+  assert.deepEqual(groupKeys(csv, "store"), ["North", "South", "East"]);
+  const south = buildTable(csv, info, "store", "South");
+  assert.equal(south.rows.length, 20);
+  assert.deepEqual(south.notes, []); // no repeated times within one store
+  assert.throws(() => buildTable(csv, info, "store", "West"), /No rows/);
+});
+
+test("a label column with one row per time is not a series column", () => {
+  const csv = readCSV("date,weekday,sales\n" + days(28).map((d, i) =>
+    `${d.toISOString().slice(0, 10)},${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i % 7]},${i}`).join("\n"));
+  assert.deepEqual(inspect(csv).groups, []);
 });
 
 test("parseTable rejects files without numbers", () => {

@@ -13,7 +13,8 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
  * stops: x values the forecast start can snap to, stop: the current one. Dragging the start line calls
  * onStop(i, false) as it passes stops and onStop(i, true) on release; stopLabel(i) names a stop.
  * fill: size the plot to the height of `el` instead of a share of its width.
- * lines: extra lines over the forecast, [{ label, y (aligned to x), color (a CSS variable), dash }].
+ * lines: extra lines over the forecast, [{ label, y (aligned to x), color (a CSS variable), dash, points }];
+ * `points: true` draws markers only, no line.
  */
 export function fanChart(el, { x, history, actual, q, future, split, dataEnd, view, onView, onReset,
                                stops = [], stop = -1, onStop, stopLabel = String,
@@ -49,7 +50,10 @@ export function fanChart(el, { x, history, actual, q, future, split, dataEnd, vi
       { label: "q75", stroke: "transparent" },
       { label: "q90", stroke: "transparent" },
       { label: "Median ahead", stroke: accent, width: 2, dash: [2, 4] },
-      ...lines.map((l) => ({ label: l.label, stroke: css(l.color), width: 1.5, dash: l.dash })),
+      ...lines.map((l) => (l.points
+        ? { label: l.label, stroke: css(l.color), width: 0, paths: () => null,
+            points: { show: true, size: 7, width: 1.5, stroke: css(l.color), fill: css("--surface") } }
+        : { label: l.label, stroke: css(l.color), width: 1.5, dash: l.dash })),
     ],
     bands: [
       { series: [7, 3], fill: band },
@@ -241,8 +245,8 @@ function tooltip(u, el, isTime, fmt, lines) {
   if (h != null) rows.push(["History", fmt(h)]);
   if (a != null) rows.push(["Actual", fmt(a)]);
   if (med != null) rows.push(["Median", fmt(med)], ["80% range", `${fmt(q10)} to ${fmt(q90)}`]);
-  // Extra lines only once the forecast starts, not on the history point they join.
-  if (med != null && h == null) lines.forEach((l, k) => extra[k] != null && rows.push([l.label, fmt(extra[k])]));
+  // Extra lines only once the forecast starts, not on the history point they join; markers wherever they are.
+  lines.forEach((l, k) => extra[k] != null && (l.points || (med != null && h == null)) && rows.push([l.label, fmt(extra[k])]));
   tip.innerHTML = `<b>${when}</b>` + rows.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("");
   tip.hidden = false;
   const left = u.valToPos(x, "x") + u.over.offsetLeft;
@@ -252,8 +256,9 @@ function tooltip(u, el, isTime, fmt, lines) {
 /**
  * Align history and a forecast on one x axis. The forecast starts at index `start` of the history and runs past
  * `dataEnd`, the end of the data; history points from `start` on are what really happened.
- * lines: extra forecast lines, [{ label, values (one per forecast step), color, dash, join }], aligned like the
- * median; `join: false` leaves out the history point the line would otherwise start from.
+ * lines: extra forecast lines, [{ label, values (one per forecast step), color, dash, join, points }], aligned like
+ * the median; `join: false` leaves out the history point the line would otherwise start from. With `points`, values
+ * are aligned to histX instead (markers on the history).
  */
 export function align({ histX, histY, start, dataEnd, fcX, quantiles, lines = [] }) {
   const x = histX.concat(fcX.slice(histX.length - start));
@@ -275,6 +280,6 @@ export function align({ histX, histY, start, dataEnd, fcX, quantiles, lines = []
   q[2] = q[2].map((v, i) => (i <= last ? v : null));
   return {
     x, history, actual, q, future, split: x[Math.max(0, start - 1)], dataEnd: x[Math.max(0, last)],
-    lines: lines.map(({ values, join = true, ...l }) => ({ ...l, y: join ? joined(values) : at(values, start) })),
+    lines: lines.map(({ values, join = true, ...l }) => ({ ...l, y: l.points ? at(values, 0) : join ? joined(values) : at(values, start) })),
   };
 }

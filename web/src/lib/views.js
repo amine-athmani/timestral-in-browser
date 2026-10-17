@@ -102,3 +102,17 @@ export function rankTableHTML(rows, sort, current) {
         + `<td>${r.spread == null ? "–" : `±${Math.round(r.spread * 50)}%`}</td><td>${r.mase == null ? "–" : r.mase.toFixed(2)}</td>`)
     + "</tr>").join("") + "</tbody>";
 }
+
+/**
+ * Anomaly list. points: from anomalies.js, most unusual first; when(row) names a row's time; names: the forecast
+ * columns (a Series column shows when there are several). Shows the first `limit`.
+ */
+export function anomalyTableHTML(points, when, names, limit = 200) {
+  const multi = names.length > 1;
+  return `<thead><tr><th>When</th>${multi ? "<th>Series</th>" : ""}<th>Value</th><th>Expected</th><th>Range</th><th>Off by</th></tr></thead><tbody>`
+    + points.slice(0, limit).map((p) => `<tr data-row="${p.row}">`
+      + `<td><button type="button" class="link">${esc(when(p.row))}</button></td>${multi ? `<td>${esc(names[p.v])}</td>` : ""}`
+      + `<td><b class="${p.value > p.high ? "high" : "low"}">${fmt(p.value)}</b></td><td>${fmt(p.median)}</td>`
+      + `<td>${fmt(p.low)} to ${fmt(p.high)}</td><td>${p.value > p.high ? "+" : "−"}${p.off < 10 ? p.off.toFixed(1) : Math.round(p.off)}×</td></tr>`).join("")
+    + "</tbody>";
+}

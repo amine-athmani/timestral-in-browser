@@ -6,8 +6,11 @@ import { readCSV, inspect, buildTable, groupKeys, season, median } from "./data.
 import { score, pool, change } from "./metrics.js";
 import { SERVICE_LEVELS, levelIndex, summarize, stepCorrelation, applyEdit, isActive, hasScenario, outlook } from "./plan.js";
 import { encodeSettings, decodeSettings } from "./settings.js";
-import { fmt, esc, pct, versus, naive, metricsHTML, backtestTableHTML, planTableHTML, scenarioEditsHTML, rankTableHTML } from "./views.js";
+import { fmt, esc, pct, versus, naive, metricsHTML, backtestTableHTML, planTableHTML, scenarioEditsHTML, rankTableHTML,
+  anomalyTableHTML } from "./views.js";
 import { printReport } from "./report.js";
+import { findAnomalies, RANGES } from "./anomalies.js";
+import { evolutionView, cycleOptions, splitCycles, embed, embedForecast } from "./evolution.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -16,7 +19,7 @@ const MAX_CONTEXT = SERVER ? 16384 : BROWSER_CONTEXT;
 const worker = SERVER ? null : new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 worker?.postMessage({ init: { urls: { "5M": modelUrl("5M"), "28M": modelUrl("28M") } } });
 const SHOWN = [0.1, 0.25, 0.5, 0.75, 0.9].map((l) => LEVELS.indexOf(l));
-const MEDIAN = LEVELS.indexOf(0.5);
+const MEDIAN = LEVELS.indexOf(0.5), Q10 = LEVELS.indexOf(0.1), Q90 = LEVELS.indexOf(0.9);
 let nextId = 0;
 let gen = 0; // bumped on every run; results from older runs are dropped
 
@@ -188,6 +191,8 @@ function showTable(presets) {
   if (presets.level != null) $("#level").value = Math.max(0, SERVICE_LEVELS.indexOf(LEVELS[levelIndex(presets.level)]));
   if (presets.agg === "sum" || presets.agg === "mean") $("#agg").value = presets.agg;
   if (presets.tab) setTab(presets.tab);
+  if (String(presets.flag) in RANGES) $("#anomaly-level").value = String(presets.flag);
+  if (presets.view) setChartView(presets.view, { quiet: true });
 
   const where = group.col ? `: ${group.key}` : "";
   $("#title").textContent = (example?.title ?? name) + where;
@@ -383,6 +388,11 @@ function chartSeries(req, q, result = null) {
       const values = result.alt.full[v].map((qs, i) => (i >= req.ahead - 1 ? (i < req.ahead ? result.full[v][i][MEDIAN] : qs[MEDIAN]) : null));
       lines.push({ label: "Scenario median", values, color: "--scenario", join: req.ahead === 0 });
     }
+    if (anomalies?.points.length) {
+      const values = Array(req.histX.length).fill(null);
+      for (const a of anomalies.points) if (a.v === v && a.row < values.length) values[a.row] = a.value;
+      lines.push({ label: `Outside the ${pct(anomalies.level)} range`, values, color: "--red", points: true });
+    }
     return {
       label, view: req.view, stops: req.stops,
       ...align({ histX: req.histX, histY: req.hist[v], start: req.start, dataEnd: req.dataEnd, fcX: req.fcX, quantiles: q[v], lines }),
@@ -393,12 +403,21 @@ function chartSeries(req, q, result = null) {
 function draw(req, q, result = null) {
   renderCharts(chartSeries(req, q, result), req.isTime);
   syncLegend(result);
+  renderEvolution();
+}
+
+const emptyForecast = (req) => req.targets.map(() => Array.from({ length: 5 }, () => Array(req.fcX.length).fill(null)));
+/** Redraw the charts from what is there: the last forecast, or the data alone. */
+function redrawCurrent() {
+  if (lastResult) return draw(lastResult.req, lastResult.q, lastResult);
+  try { const req = buildRequest(); draw(req, emptyForecast(req)); } catch { /* the status line already says why */ }
 }
 
 function syncLegend(result) {
   $("#legend-plan").hidden = !result;
   $("#legend-plan span").textContent = `Plan at ${pct(serviceLevel())}`;
   $("#legend-scenario").hidden = !result?.alt;
+  $("#legend-anomaly").hidden = !anomalies?.points.length;
 }
 
 /** Show the data and the forecast window without running the model. */
@@ -406,7 +425,9 @@ function preview() {
   lastResult = null; // the plan and the report wait for the next run
   let req;
   try { req = buildRequest(); } catch (err) { return status(err.message, true); }
-  draw(req, req.targets.map(() => Array.from({ length: 5 }, () => Array(req.fcX.length).fill(null))));
+  syncBacktest();
+  syncAnomalies();
+  draw(req, emptyForecast(req));
   $("#meta").textContent = req.notes.join(" · ");
   $("#metrics").innerHTML = "";
   $("#accuracy-empty").hidden = false;
@@ -414,7 +435,6 @@ function preview() {
   $("#download").hidden = $("#report").hidden = true;
   renderPlan();
   renderScenarioSummary();
-  syncBacktest();
   syncRanking();
   status(armed ? "" : "Press Run forecast to compute it.");
 }
@@ -437,6 +457,7 @@ async function run() {
     if (!res || g !== gen || (covs.length && hasActual && !plain) || (hasScenario(edits) && !alt)) return;
     const rho = req.targets.map((_, v) => stepCorrelation(req.actual[v], res.full[v]));
     lastResult = { req, q: res.quantiles, full: res.full, alt, rho, model };
+    syncAnomalies();
     draw(req, res.quantiles, lastResult);
     $("#meta").textContent = [`Timestral-${model}`, ...req.notes].join(" · ");
     const m = hasActual && score(req.actual, res.quantiles, req.context, table.season.m);
@@ -487,7 +508,7 @@ function downloadCSV() {
 
 /* ---------- Result tabs ---------- */
 
-const TABS = ["accuracy", "plan", "scenario", "series"];
+const TABS = ["accuracy", "plan", "scenario", "anomalies", "series"];
 const activeTab = () => TABS.find((t) => $(`#tab-${t}`).getAttribute("aria-selected") === "true");
 function setTab(name) {
   if (!TABS.includes(name) || $(`#tab-${name}`).hidden) return;
@@ -646,10 +667,13 @@ async function backtest() {
       const res = await runModel(model, req.body, g);
       const plain = covs ? await runModel(model, buildRequest({ at, backtest: true, covs: [] }).body, g) : null;
       if (!res || g !== gen || (covs && !plain)) return;
-      backtested.rows.push({ at, s: score(req.actual, res.quantiles, req.context, m),
+      // The forecast is kept with its scores: anomaly detection checks every window.
+      backtested.rows.push({ at, actual: req.actual, full: res.full, s: score(req.actual, res.quantiles, req.context, m),
                              s0: plain && score(req.actual, plain.quantiles, req.context, m) });
       renderBacktest();
+      syncAnomalies();
     }
+    redrawCurrent();
     const secs = (performance.now() - t0) / 1000;
     status(`Backtested ${starts.length} starts in ${secs.toFixed(secs < 10 ? 1 : 0)} s on this device.`);
   } catch (err) {
@@ -718,6 +742,151 @@ async function rankSeries() {
   }
 }
 
+/* ---------- Anomalies: points outside the forecast's range, wherever it can be checked ---------- */
+
+let anomalies = null; // { points, checked, windows, level } from anomalies.js, or null with nothing to check
+const anomalyLevel = () => +$("#anomaly-level").value;
+
+/** The forecast windows that can be checked: the current run's, then the backtest's. */
+function checkedWindows() {
+  const windows = [];
+  if (lastResult?.req.actual.some((s) => s.some((v) => v != null))) {
+    windows.push({ at: lastResult.req.start, actual: lastResult.req.actual, full: lastResult.full });
+  }
+  for (const r of backtested?.rows ?? []) windows.push(r);
+  return windows;
+}
+
+function syncAnomalies() {
+  const windows = checkedWindows();
+  // The current run often starts where a backtest did: count distinct starts.
+  const starts = new Set(windows.map((w) => w.at)).size;
+  anomalies = windows.length ? { ...findAnomalies(windows, anomalyLevel()), windows: starts, level: anomalyLevel() } : null;
+  renderAnomalies();
+}
+
+const rowLabel = (row) => (table.times ? timeLabel(table.times[row]) : `row ${row}`);
+
+function renderAnomalies() {
+  const box = $("#anomaly-table"), summary = $("#anomaly-summary");
+  const starts = backtestStarts().length;
+  $("#anomaly-scan").hidden = starts < 2 || (backtested?.rows.length ?? 0) >= starts;
+  if (!anomalies) {
+    box.innerHTML = "";
+    summary.textContent = "Run a forecast from an earlier start to check the points since then.";
+    return;
+  }
+  const { points, checked, windows, level } = anomalies;
+  const chance = Math.round(checked * (1 - level));
+  const from = windows > 1 ? `${windows} forecast starts` : "this forecast start";
+  summary.innerHTML = `<b>${points.length.toLocaleString()}</b> of ${checked.toLocaleString()} checked points fell outside`
+    + ` the ${pct(level)} range, from ${from}. By chance alone about ${chance.toLocaleString()} would.`
+    + (points.length ? " “Off by” is how far past the range, in widths of the range’s half on that side." : "");
+  box.innerHTML = points.length ? anomalyTableHTML(points, rowLabel, picked("t")) : "";
+}
+
+/** Show an anomaly: back to the timeline, zoomed around its row. */
+function showRow(row) {
+  if (chartView !== "timeline") setChartView("timeline");
+  const x = lastResult?.req.histX ?? buildRequest().histX;
+  const span = Math.max(48, horizon());
+  setView(x[Math.max(0, row - span)], x[Math.min(x.length - 1, row + span)]);
+}
+
+/* ---------- Evolution views: cycles and state space, with replay ---------- */
+
+let chartView = "timeline";
+let cycleChoice = null; // the cycle the user picked; until then each series opens on its own seasonal cycle
+const evolution = evolutionView($("#evolution"));
+const VIEW_HINTS = {
+  timeline: "Drag the blue line to move the start. Drag across the chart to zoom, double-click to reset.",
+  cycles: "Each line is one cycle laid over the same axis; older ones fade. Replay to watch the shape change, then see the forecast’s cycles in blue.",
+  space: "Each point is a value against the one before it. On the dashed line nothing changed. Replay to watch the path move, then see the forecast continue it in blue.",
+};
+
+/** Switch the chart area between the timeline and the evolution views. `quiet` skips drawing (while loading). */
+function setChartView(name, { quiet = false } = {}) {
+  if (!VIEW_HINTS[name]) return;
+  chartView = name;
+  document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === name));
+  const timeline = name === "timeline";
+  $("#charts").hidden = $("#timeline-legend").hidden = $(".zoom").hidden = !timeline;
+  $("#evolution").hidden = timeline;
+  $("#view-hint").textContent = VIEW_HINTS[name];
+  $("#evo-cycle-box").hidden = name !== "cycles";
+  $("#evo-lag-box").hidden = name !== "space";
+  if (quiet) return;
+  if (timeline) evolution.hide();
+  renderEvolution();
+  saveSettings();
+}
+
+/** Fill a select with [value, text] options, keeping the current choice when it is still offered. */
+function fillSelect(select, options, fallback) {
+  const keep = select.value;
+  select.innerHTML = options.map(([value, text]) => `<option value="${esc(value)}">${esc(text)}</option>`).join("");
+  select.value = options.some(([value]) => value === keep) ? keep : fallback ?? options[0]?.[0] ?? "";
+}
+
+/** Draw the evolution view for the series in view, with the forecast past the end of the data once there is one. */
+function renderEvolution() {
+  if (chartView === "timeline" || !table) return;
+  const targets = picked("t");
+  if (!targets.length) return;
+  fillSelect($("#evo-series"), targets.map((t) => [t, t]));
+  $("#evo-series-box").hidden = targets.length < 2;
+  const v = Math.max(0, targets.indexOf($("#evo-series").value));
+  const { end } = extent();
+  const values = col(targets[v]).slice(0, end);
+  const times = table.times?.slice(0, end) ?? null;
+  const m = table.season.m, h = horizon();
+  const step = times ? median(times.slice(-200).map((t, i, a) => t - a[i - 1]).slice(1)) : null;
+
+  // The forecast past the end of the data.
+  const r = lastResult, from = r?.req.ahead ?? 0;
+  const fc = r && {
+    times: r.req.fcX.slice(from),
+    median: r.full[v].slice(from).map((qs) => qs[MEDIAN]),
+    low: r.full[v].slice(from).map((qs) => qs[Q10]),
+    high: r.full[v].slice(from).map((qs) => qs[Q90]),
+  };
+  let lo = Infinity, hi = -Infinity;
+  for (const x of fc ? values.concat(fc.low, fc.high) : values) if (x != null) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+  const pad = (hi - lo) * 0.05 || 1, range = [lo - pad, hi + pad];
+  const ahead = `the forecast: the next ${h.toLocaleString()} steps`;
+
+  if (chartView === "cycles") {
+    const options = cycleOptions(step, m, values.length);
+    const preferred = [cycleChoice, table.season.name].find((id) => options.some((o) => o.id === id)) ?? options[0]?.id;
+    fillSelect($("#evo-cycle"), options.map((o) => [o.id, o.label]));
+    $("#evo-cycle").value = preferred ?? "";
+    const kind = $("#evo-cycle").value;
+    if (!kind) {
+      return evolution.show({ mode: "cycles", kind: "rows", cycles: [], forecast: null, range, frameLabel: () => "Too little data to lay out cycles" });
+    }
+    const cycles = splitCycles(kind, times, [values], m, 0);
+    const forecast = fc && splitCycles(kind, times ? fc.times : null, [fc.median, fc.low, fc.high], m, end);
+    const name = (c) => (kind === "rows" ? `from row ${c.start.toLocaleString()}`
+      : kind === "year" ? String(new Date(c.start * 1000).getUTCFullYear())
+      : `${kind === "week" ? "week of " : ""}${timeLabel(c.start).slice(0, 10)}`);
+    return evolution.show({
+      mode: "cycles", kind, cycles, forecast, range,
+      frameLabel: (k) => (cycles[k] ? `${name(cycles[k])} · ${k + 1} of ${cycles.length}` : forecast ? ahead : ""),
+    });
+  }
+
+  const lags = [[1, "the step before"]];
+  if (m > 1 && m < values.length / 2) lags.push([m, `one ${table.season.name ?? "cycle"} before (${m} steps)`]);
+  fillSelect($("#evo-lag"), lags.map(([l, t]) => [String(l), t]));
+  const lag = +$("#evo-lag").value || 1;
+  const points = embed(values, lag);
+  const forecast = fc && embedForecast(values, fc.median, fc.low, fc.high, lag);
+  evolution.show({
+    mode: "space", points, forecast, range, trail: Math.min(points.length, Math.max(12, 2 * m)),
+    frameLabel: (k) => (points[k] ? rowLabel(points[k][2]) : forecast ? ahead : "Too few values to show"),
+  });
+}
+
 /* ---------- Sharing: settings in the link, and a printable report ---------- */
 
 /** The view as link settings; see settings.js. */
@@ -728,6 +897,7 @@ function currentSettings() {
     t: picked("t"), c: picked("c"), k: picked("k"),
     h: horizon(), model: $("#model").value,
     back: origins.length - 1 - origins.indexOf(cut), level: serviceLevel(), agg: $("#agg").value, tab: activeTab(),
+    view: chartView, flag: anomalyLevel(),
     scenario: activeScenario(),
   };
 }
@@ -749,7 +919,8 @@ async function copyLink() {
 function report() {
   const { req, model } = lastResult;
   const panel = (sel) => ($(sel)?.innerHTML.trim() ? `<table class="data">${$(sel).innerHTML}</table>` : "");
-  printReport($("#report-sheet"), { redraw: () => redraw(), canvases: () => [...document.querySelectorAll("#charts canvas")] }, {
+  const canvases = () => (chartView === "timeline" ? [...document.querySelectorAll("#charts canvas")] : [$("#evolution canvas")]);
+  printReport($("#report-sheet"), { redraw: () => { redraw(); renderEvolution(); }, canvases }, {
     title: $("#title").textContent,
     subtitle: $("#blurb").textContent,
     facts: [`Timestral-${model}`, `forecast from ${originLabel(cut)}`, ...req.notes],
@@ -759,6 +930,7 @@ function report() {
       { heading: "Accuracy", html: ($("#metrics").innerHTML.trim() ? `<dl class="metrics">${$("#metrics").innerHTML}</dl>` : "")
         + ($("#effect").innerHTML.trim() ? `<p>${$("#effect").innerHTML}</p>` : "") },
       { heading: "Backtest", html: backtested?.rows.length ? `<p>${$("#backtest-summary").innerHTML}</p>${panel("#backtest-table")}` : "" },
+      { heading: "Anomalies", html: anomalies ? `<p>${$("#anomaly-summary").innerHTML}</p>${panel("#anomaly-table")}` : "" },
       { heading: "All series", html: ranked?.rows.length ? panel("#rank-table") : "" },
     ],
     footer: `${$("#source").innerHTML} Made with Timestral in the browser, ${esc(location.href.split("#")[0])}`,
@@ -842,6 +1014,18 @@ async function init() {
     if (i >= 0) moveStart(i, true);
   });
   $("#rank").addEventListener("click", rankSeries);
+  $("#anomaly-level").addEventListener("change", () => { syncAnomalies(); redrawCurrent(); saveSettings(); });
+  $("#anomaly-scan").addEventListener("click", backtest);
+  $("#anomaly-table").addEventListener("click", (e) => {
+    const row = e.target.closest("button.link")?.closest("tr")?.dataset.row;
+    if (row != null) showRow(+row);
+  });
+  document.querySelector(".views").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-view]");
+    if (b) setChartView(b.dataset.view);
+  });
+  $("#evo-cycle").addEventListener("change", (e) => { cycleChoice = e.target.value; renderEvolution(); });
+  ["#evo-lag", "#evo-series"].forEach((sel) => $(sel).addEventListener("change", renderEvolution));
   $("#rank-table").addEventListener("click", (e) => {
     const sort = e.target.closest("button.sort")?.dataset.sort;
     if (sort && ranked) {

@@ -71,6 +71,11 @@ const models = SERVER
       </div>
     </div>
     <div class="chart-bar">
+      <div class="views" role="group" aria-label="Chart">
+        <button type="button" data-view="timeline" aria-pressed="true">Timeline</button>
+        <button type="button" data-view="cycles" aria-pressed="false">Cycles</button>
+        <button type="button" data-view="space" aria-pressed="false">State space</button>
+      </div>
       <p class="start-label"><span class="meta">Forecast from</span> <output id="origin-label"></output></p>
       <div class="zoom" role="toolbar" aria-label="Chart view">
         <button class="btn ghost small" type="button" id="zoom-back" title="Earlier in time" aria-label="Earlier in time">←</button>
@@ -80,10 +85,27 @@ const models = SERVER
         <button class="btn ghost small" type="button" id="zoom-all" title="Show all the data">All</button>
         <button class="btn ghost small" type="button" id="zoom-reset" title="Back to the default view">Reset</button>
       </div>
-      <p class="hint">Drag the blue line to move the start. Drag across the chart to zoom, double-click to reset.</p>
+      <p class="hint" id="view-hint">Drag the blue line to move the start. Drag across the chart to zoom, double-click to reset.</p>
     </div>
     <div id="charts"></div>
-    <ul class="legend" aria-hidden="true">
+    <div class="evolution" id="evolution" hidden>
+      <div class="evo-controls">
+        <button class="btn ghost small" type="button" data-evo="play" aria-pressed="false">Replay</button>
+        <input type="range" data-evo="time" min="0" max="0" value="0" aria-label="Replay position">
+        <output data-evo="label"></output>
+        <label id="evo-cycle-box">Cycle <select id="evo-cycle"></select></label>
+        <label id="evo-lag-box">Against <select id="evo-lag"></select></label>
+        <label id="evo-series-box">Series <select id="evo-series"></select></label>
+      </div>
+      <canvas class="evo-canvas" aria-label="How the series changes over time, with the forecast"></canvas>
+      <ul class="legend" aria-hidden="true">
+        <li><i class="l-old"></i>Earlier</li>
+        <li><i class="l-hist"></i>Latest in the replay</li>
+        <li><i class="l-med"></i>Forecast median</li>
+        <li><i class="l-band"></i>80% range</li>
+      </ul>
+    </div>
+    <ul class="legend" id="timeline-legend" aria-hidden="true">
       <li><i class="l-past"></i>Before the forecast start</li>
       <li><i class="l-start"></i>Forecast start</li>
       <li><i class="l-hist"></i>History</li>
@@ -94,11 +116,13 @@ const models = SERVER
       <li><i class="l-end"></i>End of the data</li>
       <li id="legend-plan" hidden><i class="l-plan"></i><span>Plan level</span></li>
       <li id="legend-scenario" hidden><i class="l-scenario"></i>Scenario median</li>
+      <li id="legend-anomaly" hidden><i class="l-anomaly"></i>Outside the range</li>
     </ul>
     <div class="tabs" role="tablist" aria-label="Results">
       <button type="button" role="tab" id="tab-accuracy" aria-controls="panel-accuracy" aria-selected="true">Accuracy</button>
       <button type="button" role="tab" id="tab-plan" aria-controls="panel-plan" aria-selected="false" tabindex="-1">Plan</button>
       <button type="button" role="tab" id="tab-scenario" aria-controls="panel-scenario" aria-selected="false" tabindex="-1">Scenario</button>
+      <button type="button" role="tab" id="tab-anomalies" aria-controls="panel-anomalies" aria-selected="false" tabindex="-1">Anomalies</button>
       <button type="button" role="tab" id="tab-series" aria-controls="panel-series" aria-selected="false" tabindex="-1" hidden>All series</button>
     </div>
 
@@ -140,6 +164,16 @@ const models = SERVER
         <p class="effect" id="scenario-summary"></p>
         <button class="btn ghost small" type="button" id="scenario-reset" hidden>Clear the scenario</button>
       </div>
+    </section>
+
+    <section class="panel" role="tabpanel" id="panel-anomalies" aria-labelledby="tab-anomalies" hidden>
+      <div class="panel-head plan-controls">
+        <label>Flag points outside the
+          <select id="anomaly-level"><option value="0.98" selected>98% range</option><option value="0.9">90% range</option><option value="0.8">80% range</option></select></label>
+        <button class="btn ghost small" type="button" id="anomaly-scan">Scan more of the history</button>
+      </div>
+      <p class="hint" id="anomaly-summary">Run a forecast from an earlier start to check the points since then.</p>
+      <div class="table-wrap"><table class="data" id="anomaly-table"></table></div>
     </section>
 
     <section class="panel" role="tabpanel" id="panel-series" aria-labelledby="tab-series" hidden>

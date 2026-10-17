@@ -2,10 +2,10 @@
 // name and the settings, never the data. No DOM, tested in web/test/.
 
 const LISTS = ["t", "c", "k"]; // targets, covariates, covariates known ahead
-const NUMBERS = ["h", "back", "level"]; // steps ahead, forecast start (stops back from the end), service level
+const NUMBERS = ["h", "back", "level", "flag"]; // steps ahead, forecast start (stops back from the end), service level, anomaly range
 
 /**
- * Settings: { ex | file, group, key, t, c, k, h, model, back, level, agg, tab, scenario }. Missing fields are left
+ * Settings: { ex | file, group, key, t, c, k, h, model, back, level, agg, tab, view, flag, scenario }. Missing fields are left
  * out; `scenario` is stored as JSON.
  */
 export function encodeSettings(s) {

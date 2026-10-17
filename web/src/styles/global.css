@@ -308,10 +308,29 @@ table.data tr.current td { background: var(--blue-bg); color: var(--blue); }
 /* Extra chart lines */
 .l-plan { border-top: 2px dashed var(--plan); }
 .l-scenario { border-top: 2px solid var(--scenario); }
+.l-anomaly { width: 8px !important; height: 8px !important; border: 1.5px solid var(--red); border-radius: 50%; }
+.l-old { border-top: 1.5px solid color-mix(in srgb, var(--ink) 25%, transparent); }
+table.data b.high, table.data b.low { color: var(--red); }
+
+/* Chart views: timeline, cycles, state space */
+.views { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; padding: 2px; gap: 2px; }
+.views button { font: 500 12px var(--sans); color: var(--muted); background: none; border: 0; border-radius: 5px; padding: 4px 10px; cursor: pointer; }
+.views button:hover { color: var(--ink); }
+.views button[aria-pressed="true"] { background: var(--blue-bg); color: var(--blue); }
+.views button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.evolution { margin-top: 8px; display: flex; flex-direction: column; }
+.evo-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; color: var(--muted); }
+.evo-controls input[type="range"] { flex: 1 1 160px; accent-color: var(--accent); min-width: 120px; }
+.evo-controls output { font: 500 12px var(--mono); color: var(--ink); min-width: 12ch; }
+.evo-controls label { display: flex; align-items: center; gap: 6px; }
+.evo-controls select { width: auto; padding: 4px 8px; font-size: 13px; }
+.evo-canvas { display: block; width: 100%; height: 340px; margin-top: 8px; }
 
 @media (min-width: 901px) and (min-height: 640px) {
   body.home .tabs { margin-top: 10px; }
   body.home .panel { max-height: 210px; overflow: auto; padding-top: 10px; }
+  body.home .evolution:not([hidden]) { flex: 1 1 0; min-height: 240px; }
+  body.home .evo-canvas { flex: 1 1 0; height: auto; min-height: 180px; }
   body.home .panel .table-wrap { overflow: visible; }
   body.home .backtest { margin-top: 10px; padding-top: 10px; }
 }

@@ -1,0 +1,44 @@
+name: CI
+
+# Checks every pull request and push to dev: unit tests, both site builds and the Python sources.
+# The parity tests need exported models and the timestral package, so they stay a local step (see README).
+on:
+  pull_request:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # No install scripts: the build and tests do not need onnxruntime-node's native download.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - name: Build the browser site
+        run: npm run build
+      - name: Build the Docker site
+        run: npm run build
+        env:
+          PUBLIC_BACKEND: server
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile the server and scripts
+        run: python -m py_compile server/app.py scripts/*.py tests/parity/make_fixtures.py

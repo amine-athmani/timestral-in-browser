@@ -1,0 +1,79 @@
+[
+ {
+  "id": "co2",
+  "horizon": 60,
+  "title": "Atmospheric CO2",
+  "freq": "Monthly",
+  "blurb": "Monthly CO2 at Mauna Loa since 1958: a steady rise with a yearly cycle.",
+  "source": "NOAA Global Monitoring Laboratory",
+  "source_url": "https://gml.noaa.gov/ccgg/trends/",
+  "license": "Public domain",
+  "covariates": [],
+  "targets": [
+   "CO2 (ppm)"
+  ]
+ },
+ {
+  "id": "sunspots",
+  "horizon": 132,
+  "title": "Sunspots",
+  "freq": "Monthly",
+  "blurb": "Monthly sunspot counts since 1749. The cycle lasts about 11 years and every peak is different.",
+  "source": "SILSO, Royal Observatory of Belgium",
+  "source_url": "https://www.sidc.be/SILSO/",
+  "license": "CC BY-NC 4.0",
+  "covariates": [],
+  "targets": [
+   "Sunspot number"
+  ]
+ },
+ {
+  "id": "wikipedia",
+  "horizon": 56,
+  "title": "Wikipedia views",
+  "freq": "Daily",
+  "blurb": "Daily views of the English Wikipedia article on Python, with a weekly rhythm and holiday dips.",
+  "source": "Wikimedia Pageviews API",
+  "source_url": "https://wikimedia.org/api/rest_v1/",
+  "license": "CC0",
+  "covariates": [],
+  "targets": [
+   "Daily views"
+  ]
+ },
+ {
+  "id": "weather",
+  "horizon": 72,
+  "targets": [
+   "Temperature (\u00b0C)",
+   "Humidity (%)"
+  ],
+  "title": "Paris weather",
+  "freq": "Hourly",
+  "blurb": "Hourly temperature and humidity in Paris. Both columns are forecast together.",
+  "source": "Open-Meteo",
+  "source_url": "https://open-meteo.com/",
+  "license": "CC BY 4.0",
+  "covariates": []
+ },
+ {
+  "id": "bikes",
+  "horizon": 168,
+  "title": "Bike rentals",
+  "freq": "Hourly",
+  "blurb": "Hourly bike rentals in Washington, D.C., in 2011 and 2012, with weather and holiday columns you can use as covariates.",
+  "source": "UCI Machine Learning Repository",
+  "source_url": "https://archive.ics.uci.edu/dataset/275/bike+sharing+dataset",
+  "license": "CC BY 4.0",
+  "covariates": [
+   "temp",
+   "hum",
+   "weathersit",
+   "workingday",
+   "holiday"
+  ],
+  "targets": [
+   "Rentals per hour"
+  ]
+ }
+]

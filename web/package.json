@@ -1,0 +1,19 @@
+{
+  "name": "timestral-demo",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "7.3.5",
+    "onnxruntime-web": "1.30.0",
+    "papaparse": "5.4.1",
+    "uplot": "1.6.32"
+  },
+  "devDependencies": {
+    "onnxruntime-node": "1.30.0"
+  }
+}

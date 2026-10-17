@@ -1,0 +1,21 @@
+---
+import Base from "../layouts/Base.astro";
+import Header from "../components/Header.astro";
+import Workbench from "../components/Workbench.astro";
+import Footer from "../components/Footer.astro";
+---
+<Base
+  title="Timestral in the browser"
+  bodyClass="home"
+  description="Run Mistral's Timestral forecasting model in your browser, on example datasets or your own CSV. Nothing is uploaded."
+>
+  <Header current="home" />
+  <main>
+    <Workbench />
+  </main>
+  <Footer />
+</Base>
+
+<script>
+  import "../lib/app.js";
+</script>

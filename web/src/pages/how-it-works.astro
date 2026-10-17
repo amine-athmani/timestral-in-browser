@@ -1,0 +1,173 @@
+---
+import Base from "../layouts/Base.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+import { BASE, GITHUB_URL, HF_ONNX } from "../lib/config.js";
+
+const ext = { target: "_blank", rel: "noopener" };
+// A wavy history line for the diagrams.
+const wave = (x0, y0, n, step) =>
+  Array.from({ length: n }, (_, i) => `${x0 + i * step},${(y0 - 16 * Math.sin(i / 2.2) - i * 0.5).toFixed(1)}`).join(" ");
+// Arrow from (x, y) with length dx (negative points left).
+const arrow = (x, y, dx) => { const s = Math.sign(dx) * 7; return `M${x} ${y}h${dx} m${-s} -5 l${s} 5 l${-s} 5`; };
+---
+<Base
+  title="How it works · Timestral in the browser"
+  description="What Timestral is, and how this site runs it in the browser with ONNX, or on your computer with Docker."
+>
+  <Header current="how" />
+  <main class="wrap prose">
+    <h1>How it works</h1>
+    <p class="lede">
+      Timestral is a forecasting model from Mistral AI. This site runs it in your browser, or on your computer with
+      Docker.
+    </p>
+
+    <h2>The model</h2>
+    <figure class="diagram" aria-label="Timestral reads the history in 32-step patches and returns 21 quantiles per future step">
+      <svg viewBox="0 0 720 150" role="img">
+        <g class="d-label"><text x="20" y="20">History</text><text x="300" y="20">Transformer</text><text x="500" y="20">Forecast</text></g>
+        {[0, 1, 2, 3, 4, 5, 6].map((i) => <rect class="d-patch" x={20 + i * 32} y="38" width="28" height="70" rx="4" />)}
+        <polyline class="d-line" points={wave(22, 76, 23, 10)} />
+        <text class="d-small" x="20" y="132">Up to 32,768 steps, in patches of 32</text>
+        <path class="d-arrow" d={arrow(258, 73, 34)} />
+        <rect class="d-box" x="300" y="38" width="150" height="70" rx="8" />
+        <text class="d-small" x="375" y="68" text-anchor="middle">Forecast tokens</text>
+        <text class="d-small" x="375" y="86" text-anchor="middle">read the history</text>
+        <path class="d-arrow" d={arrow(458, 73, 34)} />
+        <path class="d-band" d="M500 74 L700 40 L700 108 Z" />
+        <path class="d-band-in" d="M500 74 L700 56 L700 92 Z" />
+        <path class="d-median" d="M500 74 L700 74" />
+        <text class="d-small" x="500" y="132">21 quantiles per step</text>
+      </svg>
+    </figure>
+    <ul>
+      <li>Four sizes share one architecture: 5M, 28M, 123M and 209M parameters. Mistral released them on 15 October 2026.</li>
+      <li>It forecasts series it has never seen, without training on your data.</li>
+      <li>It returns 21 quantiles per step, from the 1st to the 99th percentile, so you get a range and a median.</li>
+      <li>It can forecast several series together and use covariates known in the past or into the future.</li>
+      <li>It predicts up to 1,024 steps per pass. Longer horizons append the median of one pass to the history for the next.</li>
+    </ul>
+    <p>
+      Mistral reports that the 209M model ranks first on the GIFT-Eval, TIME and fev-bench benchmarks, and that the
+      28M model beats Chronos-2, a model about four times its size, on GIFT-Eval and TIME.
+    </p>
+    <ul class="links">
+      <li><a href="https://mistral.ai/news/timestral/" {...ext}>Mistral's announcement</a></li>
+      <li><a href="https://github.com/mistralai/timestral" {...ext}>Official code on GitHub</a></li>
+      <li><a href="https://huggingface.co/collections/mistralai/timestral" {...ext}>Official weights on Hugging Face</a></li>
+    </ul>
+
+    <h2>Two ways to run it</h2>
+    <figure class="diagram" aria-label="The website runs ONNX models in a Web Worker; the Docker image runs the official Python package">
+      <svg viewBox="0 0 720 210" role="img">
+        <text class="d-label" x="20" y="22">This website</text>
+        <rect class="d-box" x="20" y="34" width="150" height="54" rx="8" /><text class="d-small" x="95" y="66" text-anchor="middle">Your browser tab</text>
+        <path class="d-arrow" d={arrow(176, 61, 44)} />
+        <rect class="d-box d-hi" x="226" y="34" width="230" height="54" rx="8" /><text class="d-small" x="341" y="57" text-anchor="middle">Web Worker</text><text class="d-small" x="341" y="75" text-anchor="middle">onnxruntime-web, 4 threads</text>
+        <path class="d-arrow" d={arrow(514, 61, -52)} />
+        <rect class="d-box" x="520" y="34" width="180" height="54" rx="8" /><text class="d-small" x="610" y="57" text-anchor="middle">ONNX, 5M or 28M</text><text class="d-small" x="610" y="75" text-anchor="middle">13 or 59 MB, cached</text>
+
+        <text class="d-label" x="20" y="132">Docker on your computer</text>
+        <rect class="d-box" x="20" y="144" width="150" height="54" rx="8" /><text class="d-small" x="95" y="176" text-anchor="middle">Your browser tab</text>
+        <path class="d-arrow" d={arrow(176, 171, 44)} />
+        <rect class="d-box d-hi" x="226" y="144" width="230" height="54" rx="8" /><text class="d-small" x="341" y="167" text-anchor="middle">Python server</text><text class="d-small" x="341" y="185" text-anchor="middle">official timestral package</text>
+        <path class="d-arrow" d={arrow(514, 171, -52)} />
+        <rect class="d-box" x="520" y="144" width="180" height="54" rx="8" /><text class="d-small" x="610" y="167" text-anchor="middle">Weights, 5M to 209M</text><text class="d-small" x="610" y="185" text-anchor="middle">full precision</text>
+      </svg>
+    </figure>
+
+    <h3>In the browser</h3>
+    <p>
+      Browsers can't run PyTorch, so the model is exported to ONNX and run with onnxruntime-web, compiled to
+      WebAssembly. Your data never leaves the page.
+    </p>
+    <ul>
+      <li>Only 5M and 28M: the larger two weigh 490 MB and 837 MB.</li>
+      <li>Weights are stored at 16-bit precision to halve the download. The math runs at 32-bit.</li>
+      <li>The history is capped at 4,096 steps, because attention cost grows with the square of its length.</li>
+      <li>A small service worker (coi-serviceworker) turns on multi-threading on GitHub Pages. The page reloads once on the first visit.</li>
+      <li>A 168-step forecast from 4,096 hourly steps takes about half a second with 28M on a desktop.</li>
+    </ul>
+    <p>
+      The ONNX file holds one decoding pass. The rest of the forecast, about 200 lines of the official Python code, is
+      ported to JavaScript. A test suite compares both on 18 cases: the largest difference is 0.03% of the largest
+      forecast value. An 8-bit version was rejected because it moved forecasts by up to 84%.
+    </p>
+    <details>
+      <summary>What had to change for the export</summary>
+      <p>Four changes, none of which changes the math:</p>
+      <ul>
+        <li>A running-statistics loop that depends on the series length. As exported, it gave wrong results past 3,072 steps, so it now runs a fixed number of steps.</li>
+        <li>An early return that depends on the input values, which ONNX can't express.</li>
+        <li><code>cummax</code>, which ONNX lacks, replaced with an equivalent cumulative sum.</li>
+        <li>A yes/no selection that onnxruntime-web can't run, rewritten as plain logic.</li>
+      </ul>
+    </details>
+    <ul class="links">
+      <li><a href={HF_ONNX["5M"]} {...ext}>Timestral-5M ONNX on Hugging Face</a></li>
+      <li><a href={HF_ONNX["28M"]} {...ext}>Timestral-28M ONNX on Hugging Face</a></li>
+    </ul>
+
+    <h3>With Docker</h3>
+    <p>
+      The Docker image serves the same page, but forecasts come from the official Python package on your computer:
+      all four sizes, full precision, and up to 16,384 steps of history. Weights download from Hugging Face the first
+      time you use a size. Instructions are in the <a href={GITHUB_URL} {...ext}>README on GitHub</a>.
+    </p>
+
+    <h2>Reading the results</h2>
+    <figure class="diagram" aria-label="Annotated forecast chart">
+      <svg viewBox="0 0 720 200" role="img">
+        <rect class="d-past" x="20" y="14" width="230" height="160" />
+        <polyline class="d-line" points={wave(20, 104, 24, 10)} />
+        <path class="d-band" d="M250 100 C 400 60, 550 40, 700 30 L700 170 C 550 160, 400 140, 250 100 Z" />
+        <path class="d-band-in" d="M250 100 C 400 80, 550 70, 700 66 L700 134 C 550 130, 400 120, 250 100 Z" />
+        <path class="d-actual" d="M250 100 C 300 120, 340 70, 390 95 S 470 130, 520 90" />
+        <path class="d-median" d="M250 100 H520" />
+        <path class="d-median d-dotted" d="M520 100 H700" />
+        <path class="d-start" d="M250 14v160" />
+        <path class="d-end" d="M520 14v160" />
+        <g class="d-small">
+          <text x="20" y="192">History</text>
+          <text x="258" y="30">Forecast start: drag it</text>
+          <text x="610" y="26">80% range</text>
+          <text x="612" y="62">50% range</text>
+          <text x="600" y="118">Median</text>
+          <text x="330" y="192">What happened</text>
+          <text x="528" y="44">End of the data</text>
+          <text x="530" y="192">Future: no data yet</text>
+        </g>
+      </svg>
+    </figure>
+    <ul>
+      <li>Drag the blue line on the chart, or focus it and use the arrow keys, to pick where the forecast starts. It snaps to the ticks along the bottom, one forecast length apart.</li>
+      <li>Drag across a chart to zoom in, and double-click it to go back. The buttons above the charts move back and forward in time, zoom out, or show all the data. Ctrl or ⌘ with the scroll wheel (or a pinch) zooms; Shift with the wheel (or a sideways swipe) moves along the time axis.</li>
+      <li>Every forecast runs to the same place: the end of the data plus the steps ahead. The gray area is the history the model sees. Everything after the forecast start stays clear, up to the dashed line at the end of the data; past it there is nothing to check against, so the median is dotted there.</li>
+      <li><b>Average error</b> is the mean gap between the median and what happened.</li>
+      <li><b>Repeating the last value</b> is the same error for a naive forecast. If the model doesn't beat it, it adds little.</li>
+      <li><b>Inside the 80% range</b> should be near 80% when the model is honest about its uncertainty.</li>
+      <li>With covariates selected, the page also runs the forecast without them and shows the change in error. They don't always help: on the bike data they lower the error in some weeks and raise it in others.</li>
+    </ul>
+    <p>
+      To use covariates past the end of your own data, add rows at the end with the covariates filled in and the
+      forecast columns left empty.
+    </p>
+
+    <h2>Limits and license</h2>
+    <ul>
+      <li>Up to 1,024 steps ahead per run, 8 forecast columns and 8 covariates.</li>
+      <li>Categorical covariates are treated as numbers here. The Python package encodes them properly.</li>
+      <li>
+        The weights, and these ONNX files, are under Mistral AI's Modified MIT license: companies with more than
+        $20 million in monthly revenue need a commercial license from Mistral. This site's code is Apache 2.0.
+      </li>
+      <li>
+        Example data: NOAA Global Monitoring Laboratory (public domain), SILSO at the Royal Observatory of Belgium
+        (CC BY-NC 4.0), Wikimedia Pageviews API (CC0), Open-Meteo (CC BY 4.0), UCI Machine Learning Repository (CC BY 4.0).
+      </li>
+    </ul>
+    <p><a class="btn" href={BASE}>Try a forecast</a></p>
+  </main>
+  <Footer />
+</Base>

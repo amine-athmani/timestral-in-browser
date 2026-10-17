@@ -1,0 +1,18 @@
+---
+import { BASE, GITHUB_URL } from "../lib/config.js";
+
+const { current } = Astro.props;
+---
+<header class="bar">
+  <div class="wrap bar-inner">
+    <a class="mark" href={BASE} aria-label="Timestral in the browser, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6"/><path d="M5 21l6-6 5 4 5-8 6 5"/></svg>
+      <span>Timestral <em>in the browser</em></span>
+    </a>
+    <nav>
+      <a href={BASE} aria-current={current === "home" ? "page" : undefined}>Forecast</a>
+      <a href={`${BASE}how-it-works/`} aria-current={current === "how" ? "page" : undefined}>How it works</a>
+      <a href={GITHUB_URL} target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </div>
+</header>

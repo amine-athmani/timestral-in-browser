@@ -1,0 +1,88 @@
+---
+import { BASE, SERVER } from "../lib/config.js";
+
+const models = SERVER
+  ? [["28M", "28M"], ["209M", "209M, most accurate"], ["123M", "123M"], ["5M", "5M, fastest"]]
+  : [["28M", "28M · 59 MB"], ["5M", "5M · 13 MB, faster"]];
+---
+<section class="wrap intro">
+  <h1>Forecast a time series in your browser</h1>
+  <p class="lede">
+    {SERVER
+      ? "This page runs Timestral, Mistral's forecasting model, on this computer with the official Python package. Pick an example or open a CSV file."
+      : "This page runs Timestral, Mistral's forecasting model, on your computer. Pick an example or open a CSV file. The model and your data stay in this tab, and nothing is sent to a server."}{" "}
+    <a href={`${BASE}how-it-works/`}>Read how it works.</a>
+  </p>
+</section>
+
+<section class="wrap bench">
+  <form class="card controls" id="form">
+    <fieldset>
+      <legend>Data</legend>
+      <div class="sources" id="sources" role="group" aria-label="Example datasets"></div>
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept=".csv,.tsv,.txt,text/csv">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <span><b>Open a CSV file</b> or drop it here. One row per time step.</span>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Columns to forecast</legend>
+      <div class="checks" id="targets"></div>
+    </fieldset>
+
+    <div class="row">
+      <label>Steps ahead <input type="number" id="horizon" min="1" max="1024" value="48"></label>
+      <label>Model
+        <select id="model">
+          {models.map(([value, label]) => <option value={value}>{label}</option>)}
+        </select>
+      </label>
+    </div>
+    <button class="btn" type="submit" id="run">Run forecast</button>
+    <p class="status" id="status" role="status"></p>
+  </form>
+
+  <article class="card result" aria-live="polite">
+    <div class="result-head">
+      <div>
+        <p class="meta" id="meta"></p>
+        <h2 id="title"></h2>
+        <p class="muted" id="blurb"></p>
+      </div>
+      <button class="btn ghost small" type="button" id="download" hidden>Download CSV</button>
+    </div>
+    <div class="chart-bar">
+      <p class="start-label"><span class="meta">Forecast from</span> <output id="origin-label"></output></p>
+      <div class="zoom" role="toolbar" aria-label="Chart view">
+        <button class="btn ghost small" type="button" id="zoom-back" title="Earlier in time" aria-label="Earlier in time">←</button>
+        <button class="btn ghost small" type="button" id="zoom-ahead" title="Later in time" aria-label="Later in time">→</button>
+        <button class="btn ghost small" type="button" id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+        <button class="btn ghost small" type="button" id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+        <button class="btn ghost small" type="button" id="zoom-all" title="Show all the data">All</button>
+        <button class="btn ghost small" type="button" id="zoom-reset" title="Back to the default view">Reset</button>
+      </div>
+      <p class="hint">Drag the blue line to move the start. Drag across the chart to zoom, double-click to reset.</p>
+    </div>
+    <div id="charts"></div>
+    <ul class="legend" aria-hidden="true">
+      <li><i class="l-past"></i>Before the forecast start</li>
+      <li><i class="l-start"></i>Forecast start</li>
+      <li><i class="l-hist"></i>History</li>
+      <li><i class="l-act"></i>What happened</li>
+      <li><i class="l-med"></i>Median forecast</li>
+      <li><i class="l-ahead"></i>Past the end of the data</li>
+      <li><i class="l-band"></i>50% and 80% ranges</li>
+      <li><i class="l-end"></i>End of the data</li>
+    </ul>
+    <fieldset class="cov" id="covariates-box">
+      <legend>Covariates</legend>
+      <div class="checks" id="covariates"></div>
+      <p class="hint">Columns the model can use to explain the forecast, like temperature or holidays.</p>
+      <p class="effect" id="effect"></p>
+    </fieldset>
+    <dl class="metrics" id="metrics"></dl>
+    <p class="source" id="source"></p>
+  </article>
+</section>

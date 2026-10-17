@@ -243,6 +243,29 @@ input[type="number"], select {
 .good { color: var(--green) !important; }
 .bad { color: var(--red) !important; }
 
+/* Covariates: each one can be known ahead or past only */
+.cov-item { display: inline-flex; gap: 2px; }
+.cov-item:has(input[name="c"]:disabled) { display: none; } /* a column picked for forecasting */
+.cov-item:not(:has(input[name="c"]:checked)) .ahead { display: none; }
+.checks label.ahead { font: 400 11px var(--mono); padding: 4px 7px; color: var(--muted); }
+
+/* Backtest across every forecast start */
+.backtest { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--line); }
+.backtest-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.backtest-head .hint { margin: 0; flex: 1 1 220px; }
+.table-wrap { overflow: auto; margin-top: 10px; }
+.table-wrap:has(table:empty) { display: none; }
+.backtest table { width: 100%; border-collapse: collapse; font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.backtest th { text-align: right; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; padding: 4px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
+.backtest td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.backtest th:first-child, .backtest td:first-child { text-align: left; padding-left: 0; }
+.backtest tr.current td { background: var(--blue-bg); color: var(--blue); }
+.link { font: inherit; color: var(--blue); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+@media (min-width: 901px) and (min-height: 640px) {
+  body.home .backtest { margin-top: 10px; padding-top: 10px; }
+  body.home .table-wrap { max-height: 120px; }
+}
+
 /* How it works */
 .prose { max-width: 760px; padding-block: 48px 72px; }
 .prose h2 { margin: 44px 0 12px; }

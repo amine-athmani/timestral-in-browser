@@ -145,13 +145,22 @@ const arrow = (x, y, dx) => { const s = Math.sign(dx) * 7; return `M${x} ${y}h${
       <li>Drag across a chart to zoom in, and double-click it to go back. The buttons above the charts move back and forward in time, zoom out, or show all the data. Ctrl or ⌘ with the scroll wheel (or a pinch) zooms; Shift with the wheel (or a sideways swipe) moves along the time axis.</li>
       <li>Every forecast runs to the same place: the end of the data plus the steps ahead. The gray area is the history the model sees. Everything after the forecast start stays clear, up to the dashed line at the end of the data; past it there is nothing to check against, so the median is dotted there.</li>
       <li><b>Average error</b> is the mean gap between the median and what happened.</li>
-      <li><b>Repeating the last value</b> is the same error for a naive forecast. If the model doesn't beat it, it adds little.</li>
+      <li>The <b>naive guess</b> is the same error for a forecast that repeats the last cycle: the last day for hourly data, the last week for daily data, the last year for weekly, monthly or quarterly data, and the last value otherwise. If the model doesn't beat it, it adds little.</li>
+      <li><b>Scaled error</b> (MASE) divides the average error by the error a one-cycle-back guess makes on the history, so it compares across series. Under 1 is better than that guess.</li>
       <li><b>Inside the 80% range</b> should be near 80% when the model is honest about its uncertainty.</li>
       <li>With covariates selected, the page also runs the forecast without them and shows the change in error. They don't always help: on the bike data they lower the error in some weeks and raise it in others.</li>
+      <li>One start can be lucky. <b>Backtest every start</b> forecasts from each tick on the line, scores each window and pools them, with and without covariates when some are selected. Click a start in the table to look at it.</li>
     </ul>
     <p>
-      To use covariates past the end of your own data, add rows at the end with the covariates filled in and the
-      forecast columns left empty.
+      Each covariate is <b>known ahead</b> or past only. Known ahead, the model sees its values over the forecast, which
+      is right for a holiday calendar or a planned promotion. Past only, it sees just the history, which is right for
+      anything you measure as it happens, like the weather: in a backtest, giving the model the real future weather
+      would flatter it. To use known covariates past the end of your own data, add rows at the end with the covariates
+      filled in and the forecast columns left empty.
+    </p>
+    <p>
+      CSV files can use commas, semicolons or tabs, and decimal commas. The time column can hold ISO dates, day-first
+      dates like 31/12/2025, or years. Rows are sorted by time, and rows without a valid time are left out.
     </p>
 
     <h2>Limits and license</h2>

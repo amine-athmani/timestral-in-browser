@@ -74,6 +74,10 @@
   ],
   "targets": [
    "Rentals per hour"
+  ],
+  "known": [
+   "workingday",
+   "holiday"
   ]
  }
 ]

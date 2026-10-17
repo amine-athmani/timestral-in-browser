@@ -83,7 +83,8 @@ EXAMPLES = [
          blurb="Hourly bike rentals in Washington, D.C., in 2011 and 2012, with weather and holiday columns "
                "you can use as covariates.",
          source="UCI Machine Learning Repository", source_url="https://archive.ics.uci.edu/dataset/275/bike+sharing+dataset",
-         license="CC BY 4.0", covariates=["temp", "hum", "weathersit", "workingday", "holiday"]),
+         license="CC BY 4.0", covariates=["temp", "hum", "weathersit", "workingday", "holiday"],
+         known=["workingday", "holiday"]),  # weather is only measured as it happens
 ]
 
 

@@ -2,6 +2,8 @@ import Papa from "papaparse";
 import { BASE, DATA_URL, SERVER, modelUrl } from "./config.js";
 import { fanChart, align } from "./chart.js";
 import { LEVELS, MAX_CONTEXT as BROWSER_CONTEXT } from "./timestral.js";
+import { parseTable, season, median } from "./data.js";
+import { score, pool, change } from "./metrics.js";
 
 const $ = (s) => document.querySelector(s);
 const fmt = (v) => (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : +v.toPrecision(3));
@@ -15,7 +17,7 @@ const SHOWN = [0.1, 0.25, 0.5, 0.75, 0.9].map((l) => LEVELS.indexOf(l));
 let nextId = 0;
 let gen = 0; // bumped on every run; results from older runs are dropped
 
-let table = null; // { rows, timeCol, times, example }
+let table = null; // { rows, times, name, season }: rows hold numbers or null
 let lastResult = null;
 let armed = false; // after the first Run click, changes re-run the forecast on their own
 let charts = [];
@@ -113,46 +115,29 @@ function status(msg, err = false) {
 
 /* ---------- Loading data ---------- */
 
-const num = (v) => {
-  if (v == null || String(v).trim() === "") return null;
-  const n = Number(String(v).trim());
-  return Number.isFinite(n) ? n : null;
-};
-function parseTime(s) {
-  let t = String(s ?? "").trim().replace(" ", "T");
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) t += "T00:00";
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(t)) t += "Z";
-  const ms = Date.parse(t);
-  return Number.isNaN(ms) ? Date.parse(s) : ms;
-}
-
-/** Parse a CSV and set up the controls. `example` carries the presets of a bundled dataset. */
+/** Parse a CSV and set up the controls. `example` carries the presets of a bundled dataset. False on failure. */
 function loadCSV(text, name, example = null) {
-  const { data, meta } = Papa.parse(text, { header: true, skipEmptyLines: "greedy" });
-  const fields = meta.fields.filter(Boolean);
-  if (!data.length || !fields.length) return status("This file has no rows or no header row.", true);
-  const share = (col, test) => {
-    const vals = data.map((r) => r[col]).filter((v) => v != null && String(v).trim() !== "");
-    return vals.length ? vals.filter(test).length / vals.length : 0;
-  };
-  const numeric = fields.filter((f) => share(f, (v) => num(v) != null) >= 0.8);
-  const timeCol = fields.find((f) => !numeric.includes(f) && share(f, (v) => !Number.isNaN(parseTime(v))) >= 0.9) ?? null;
-  if (!numeric.length) return status("This file has no numeric columns.", true);
-  const times = timeCol ? data.map((r) => parseTime(r[timeCol]) / 1000) : null;
-  table = { rows: data, times };
+  let parsed;
+  try { parsed = parseTable(text); } catch (err) { status(`Could not open ${name}: ${err.message}`, true); return false; }
+  const { fields, rows, timeCol, times, notes } = parsed;
+  table = { rows, times, name, season: season(times) };
 
-  const targets = example?.targets ?? [numeric[0]];
+  const targets = example?.targets ?? [fields[0]];
   const covariates = example?.covariates ?? [];
+  // Covariates are known ahead unless the example says otherwise; each one can be switched to past only.
+  const known = (f) => !example?.known || example.known.includes(f);
   const check = (f, group, on) =>
     `<label><input type="checkbox" name="${group}" value="${esc(f)}" ${on ? "checked" : ""}>${esc(f)}</label>`;
-  $("#targets").innerHTML = numeric.map((f) => check(f, "t", targets.includes(f))).join("");
-  $("#covariates").innerHTML = numeric.map((f) => check(f, "c", covariates.includes(f))).join("");
-  $("#covariates-box").hidden = numeric.length < 2;
-  $("#horizon").value = example?.horizon ?? Math.max(1, Math.min(96, Math.floor(data.length / 5)));
+  $("#targets").innerHTML = fields.map((f) => check(f, "t", targets.includes(f))).join("");
+  $("#covariates").innerHTML = fields.map((f) => `<span class="cov-item">${check(f, "c", covariates.includes(f))}`
+    + `<label class="ahead" title="On: the model sees its values ahead. Off: only its history.">`
+    + `<input type="checkbox" name="k" value="${esc(f)}" ${known(f) ? "checked" : ""}>known ahead</label></span>`).join("");
+  $("#covariates-box").hidden = fields.length < 2;
+  $("#horizon").value = example?.horizon ?? Math.max(1, Math.min(96, Math.floor(rows.length / 5)));
 
   $("#title").textContent = example?.title ?? name;
-  $("#blurb").textContent = example?.blurb
-    ?? `${data.length.toLocaleString()} rows${timeCol ? `, time column “${timeCol}”` : ", no time column"}.`;
+  const facts = [`${rows.length.toLocaleString()} rows`, timeCol ? `time column “${timeCol}”` : "no time column", ...notes];
+  $("#blurb").textContent = example?.blurb ?? `${facts.join(", ")}.`;
   $("#source").innerHTML = example
     ? `Data: <a href="${example.source_url}" target="_blank" rel="noopener">${esc(example.source)}</a>, ${esc(example.license)}.`
     : "Your file stays in this tab.";
@@ -161,6 +146,7 @@ function loadCSV(text, name, example = null) {
   syncColumns();
   setOrigins();
   update();
+  return true;
 }
 
 const picked = (group) => [...document.querySelectorAll(`input[name="${group}"]:checked`)].map((i) => i.value);
@@ -176,8 +162,9 @@ function syncColumns() {
 /* ---------- The forecast start ---------- */
 
 /** Rows with data in the forecast columns, and the trailing rows that only carry future covariates. */
+const col = (f) => table.rows.map((r) => r[f]);
 function extent() {
-  const t = picked("t").map((f) => table.rows.map((r) => num(r[f])));
+  const t = picked("t").map(col);
   const n = table.rows.length;
   let end = n;
   while (end > 0 && t.every((s) => s[end - 1] == null)) end--;
@@ -214,49 +201,54 @@ const ffill = (arr) => {
   return arr.map((v) => (v == null ? last : (last = v)));
 };
 
-function buildRequest(covs = picked("c")) {
+/**
+ * The forecast request from row `at`, with what the charts and scores need. It runs `h` steps past the end of the
+ * data, or with `backtest` only `h` steps from `at` (and no further than the end of the data).
+ */
+function buildRequest({ covs = picked("c"), at = cut, backtest = false } = {}) {
   const targets = picked("t");
   if (!targets.length) throw new Error("Pick at least one column to forecast.");
   if (targets.length > 8 || covs.length > 8) throw new Error("Pick at most 8 columns to forecast and 8 covariates.");
   const h = Math.round(+$("#horizon").value);
   if (!(h >= 1 && h <= 1024)) throw new Error("Steps ahead must be between 1 and 1024.");
-  const col = (f) => table.rows.map((r) => num(r[f]));
-  const T = targets.map(col), C = covs.map((f) => ffill(col(f)));
+  const ahead = new Set(picked("k"));
+  const known = covs.filter((f) => ahead.has(f)), past = covs.filter((f) => !ahead.has(f));
+  const T = targets.map(col);
   const { n, end } = extent();
-  const start = Math.max(0, cut - MAX_CONTEXT);
-  if (cut - start < 8) throw new Error("Pick a later start: the model needs some history.");
+  const start = Math.max(0, at - MAX_CONTEXT);
+  if (at - start < 8) throw new Error("Pick a later start: the model needs some history.");
 
   // The forecast runs from the start to `h` steps past the end of the data, so earlier starts also predict the future.
-  const H = end + h - cut;
-  const body = { target: T.map((s) => s.slice(start, cut)), horizon: H };
-  // Covariates are known ahead where the file has them; rows past the end of the file are left blank.
-  if (covs.length) body.knownCovariates = C.map((s) => Array.from({ length: cut + H - start }, (_, i) => (start + i < n ? s[start + i] : null)));
+  const H = backtest ? Math.min(h, end - at) : end + h - at;
+  const body = { target: T.map((s) => s.slice(start, at)), horizon: H };
+  // Known covariates are given ahead where the file has them; rows past the end of the file are left blank.
+  if (known.length) body.knownCovariates = known.map((f) => ffill(col(f))).map((s) =>
+    Array.from({ length: at + H - start }, (_, i) => (start + i < n ? s[start + i] : null)));
+  // Past-only covariates stop at the forecast start, like a measurement that only arrives as it happens.
+  if (past.length) body.pastCovariates = past.map((f) => ffill(col(f)).slice(start, at));
 
-  const xAt = (i) => {
-    const t = table.times;
-    if (!t) return i;
-    if (i < n) return t[i];
-    const diffs = t.slice(-50).map((v, j, a) => v - a[j - 1]).slice(1).sort((a, b) => a - b);
-    return t[n - 1] + diffs[diffs.length >> 1] * (i - n + 1);
-  };
+  const t = table.times;
+  const step = t ? median(t.slice(-50).map((v, j, a) => v - a[j - 1]).slice(1)) || 1 : 1;
+  const xAt = (i) => (!t ? i : i < n ? t[i] : t[n - 1] + step * (i - n + 1));
   // The charts hold all the data; they open on a fixed window for every forecast start, from a little before the
   // earliest stop to `h` steps past the data, so moving the start moves the forecast, not the axis.
   const histFrom = 0, histTo = end + h;
-  const viewFrom = Math.max(0, Math.min(origins[0] ?? cut, cut) - Math.max(h, 100));
-  const notes = [`${(cut - start).toLocaleString()} steps of history`, `${H} steps ahead`];
-  if (covs.length) notes.push(`${covs.length} covariate${covs.length > 1 ? "s" : ""}`);
+  const viewFrom = Math.max(0, Math.min(origins[0] ?? at, at) - Math.max(h, 100));
+  const notes = [`${(at - start).toLocaleString()} steps of history`, `${H} steps ahead`];
+  if (known.length) notes.push(`${known.length} known covariate${known.length > 1 ? "s" : ""}`);
+  if (past.length) notes.push(`${past.length} past covariate${past.length > 1 ? "s" : ""}`);
   return {
-    body, targets, isTime: !!table.times, notes,
+    body, targets, isTime: !!t, notes,
     view: { min: xAt(viewFrom), max: xAt(histTo - 1) },
     // The start line sits on the last point of history, where the forecast lines join it.
     stops: origins.map((c) => xAt(Math.max(0, c - 1))),
     histX: Array.from({ length: histTo - histFrom }, (_, i) => xAt(histFrom + i)),
     hist: T.map((s) => Array.from({ length: histTo - histFrom }, (_, i) => (i + histFrom < end ? s[i + histFrom] : null))),
-    start: cut - histFrom,
+    start: at - histFrom,
     dataEnd: end - histFrom,
-    fcX: Array.from({ length: H }, (_, i) => xAt(cut + i)),
-    actual: T.map((s) => s.slice(cut, end)),
-    context: T.map((s) => s.slice(start, cut)),
+    fcX: Array.from({ length: H }, (_, i) => xAt(at + i)),
+    actual: T.map((s) => s.slice(at, Math.min(end, at + H))),
+    context: T.map((s) => s.slice(start, at)),
   };
 }
 
@@ -294,26 +286,21 @@ function runModel(model, request, g) {
   });
 }
 
-function score(actual, q, context) {
-  let err = 0, naive = 0, inside = 0, count = 0;
-  actual.forEach((a, v) => {
-    const last = context[v].findLast((x) => x != null);
-    a.forEach((y, i) => {
-      if (y == null) return;
-      count++;
-      err += Math.abs(q[v][2][i] - y);
-      naive += Math.abs(last - y);
-      inside += y >= q[v][0][i] && y <= q[v][4][i];
-    });
-  });
-  return count ? { mae: err / count, naive: naive / count, coverage: inside / count, count } : null;
-}
+// The naive guess to beat: the last seasonal cycle when the data has one, the last value otherwise.
+const naiveName = () => (table.season.m > 1 ? `repeating the last ${table.season.name}` : "repeating the last value");
+const naiveError = (m) => (table.season.m > 1 ? m.seasonal : m.naive);
+const pct = (v) => `${Math.round(v * 100)}%`;
+/** "12% lower than", for a percent change in error; empty when there is nothing to compare. */
+const versus = (d) => (d == null ? "" : d === 0 ? "about the same as" : d < 0
+  ? `<b class="good">${-d}% lower</b> than` : `<b class="bad">${d}% higher</b> than`);
 
-function metricsHTML({ mae, naive, coverage }) {
+function metricsHTML(m) {
+  const name = naiveName();
   return `
-    <div><dt>Average error</dt><dd>${fmt(mae)}</dd><small>Median forecast against what happened</small></div>
-    <div><dt>Repeating the last value</dt><dd>${fmt(naive)}</dd><small>The same error for a naive guess</small></div>
-    <div><dt>Inside the 80% range</dt><dd>${Math.round(coverage * 100)}%</dd><small>About 80% means the range is honest</small></div>`;
+    <div><dt>Average error</dt><dd>${fmt(m.mae)}</dd><small>Median forecast against what happened</small></div>
+    <div><dt>${name[0].toUpperCase() + name.slice(1)}</dt><dd>${fmt(naiveError(m))}</dd><small>The same error for a naive guess</small></div>
+    <div><dt>Scaled error</dt><dd>${m.mase == null ? "–" : m.mase.toFixed(2)}</dd><small>MASE: under 1 beats a naive guess on the history</small></div>
+    <div><dt>Inside the 80% range</dt><dd>${pct(m.coverage)}</dd><small>About 80% means the range is honest</small></div>`;
 }
 
 function draw(req, q) {
@@ -332,6 +319,7 @@ function preview() {
   $("#metrics").innerHTML = "";
   $("#effect").textContent = "";
   $("#download").hidden = true;
+  syncBacktest();
   status(armed ? "" : "Press Run forecast to compute it.");
 }
 
@@ -347,21 +335,17 @@ async function run() {
   try {
     const res = await runModel(model, req.body, g);
     // With covariates and something to compare against, also forecast without them to show their effect.
-    const plain = covs.length && hasActual ? await runModel(model, buildRequest([]).body, g) : null;
+    const plain = covs.length && hasActual ? await runModel(model, buildRequest({ covs: [] }).body, g) : null;
     if (!res || g !== gen || (covs.length && hasActual && !plain)) return;
     const q = res.quantiles.map((v) => v.map((row) => row));
     draw(req, q);
     $("#meta").textContent = [`Timestral-${model}`, ...req.notes].join(" · ");
-    const m = hasActual && score(req.actual, q, req.context);
+    const m = hasActual && score(req.actual, q, req.context, table.season.m);
     $("#metrics").innerHTML = m ? metricsHTML(m) : "";
-    if (plain) {
-      const m0 = score(req.actual, plain.quantiles, req.context);
-      const change = Math.round((1 - m.mae / m0.mae) * 100);
-      $("#effect").innerHTML = change === 0
-        ? `With these covariates the average error is <b>${fmt(m.mae)}</b>, against ${fmt(m0.mae)} without them: about the same.`
-        : change > 0
-        ? `With these covariates the average error is <b>${fmt(m.mae)}</b>, against ${fmt(m0.mae)} without them: <b class="good">${change}% lower</b>.`
-        : `With these covariates the average error is <b>${fmt(m.mae)}</b>, against ${fmt(m0.mae)} without them: <b class="bad">${-change}% higher</b>.`;
+    const m0 = plain && score(req.actual, plain.quantiles, req.context, table.season.m);
+    if (m && m0) {
+      const d = versus(change(m.mae, m0.mae)) || "against";
+      $("#effect").innerHTML = `With these covariates the average error is <b>${fmt(m.mae)}</b>, ${d} ${fmt(m0.mae)} without them.`;
     } else {
       $("#effect").textContent = covs.length ? "Pick an earlier start to measure what the covariates change." : "";
     }
@@ -394,7 +378,76 @@ function downloadCSV() {
     href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "timestral-forecast.csv",
   });
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000); // revoking at once can cancel the download in some browsers
+}
+
+/* ---------- Backtest: forecast from every start and pool the scores ---------- */
+
+let backtested = null; // { key, rows: [{ at, s, s0 }], total, model, covs }
+
+// Results hold while the data, columns, horizon and model stay the same; moving the start keeps them.
+const backtestKey = () => JSON.stringify([table?.name, picked("t"), picked("c"), picked("k"), $("#horizon").value, $("#model").value]);
+const backtestStarts = () => origins.filter((c) => c < extent().end);
+
+function syncBacktest() {
+  $("#backtest-box").hidden = backtestStarts().length < 2;
+  if (backtested && backtested.key !== backtestKey()) backtested = null;
+  renderBacktest();
+}
+
+function renderBacktest() {
+  const box = $("#backtest-table"), summary = $("#backtest-summary");
+  if (!backtested?.rows.length) return void ((box.innerHTML = ""), (summary.innerHTML = ""));
+  const { rows, total, model, covs } = backtested;
+  const p = pool(rows.map((r) => r.s));
+  const lines = [`Timestral-${model} from ${rows.length}${rows.length < total ? ` of ${total}` : ""} starts,`
+    + ` ${p.count.toLocaleString()} points: average error <b>${fmt(p.mae)}</b>,`
+    + ` ${versus(change(p.mae, naiveError(p))) || "against"} ${naiveName()} (${fmt(naiveError(p))}).`
+    + ` The 80% range held <b>${pct(p.coverage)}</b> of what happened.`];
+  const p0 = covs && pool(rows.map((r) => r.s0));
+  if (p0) {
+    const wins = rows.filter((r) => r.s && r.s0 && r.s.mae < r.s0.mae).length;
+    lines.push(`With the covariates the error is ${versus(change(p.mae, p0.mae)) || "against"} without them`
+      + ` (${fmt(p0.mae)}), and lower at ${wins} of ${rows.length} starts.`);
+  }
+  summary.innerHTML = lines.join(" ");
+  const cell = (v, digits) => (v == null ? "–" : digits ? v.toFixed(digits) : fmt(v));
+  box.innerHTML = `<thead><tr><th>Start</th><th>Error</th><th>Naive</th><th>MASE</th><th>In 80%</th>`
+    + `${covs ? "<th>No covariates</th>" : ""}</tr></thead><tbody>`
+    + rows.map(({ at, s, s0 }) => `<tr data-at="${at}"${at === cut ? ' class="current"' : ""}>`
+      + `<td><button type="button" class="link">${esc(originLabel(at))}</button></td><td>${cell(s?.mae)}</td>`
+      + `<td>${cell(s && naiveError(s))}</td><td>${cell(s?.mase, 2)}</td><td>${s ? pct(s.coverage) : "–"}</td>`
+      + `${covs ? `<td>${cell(s0?.mae)}</td>` : ""}</tr>`).join("") + "</tbody>";
+}
+
+async function backtest() {
+  const starts = backtestStarts();
+  if (!starts.length) return;
+  clearTimeout(timer);
+  const g = ++gen;
+  const model = $("#model").value, covs = picked("c").length > 0, m = table.season.m;
+  backtested = { key: backtestKey(), rows: [], total: starts.length, model, covs };
+  renderBacktest();
+  $("#backtest").disabled = $("#run").disabled = true;
+  const t0 = performance.now();
+  try {
+    for (const [k, at] of starts.entries()) {
+      status(`Backtesting: start ${k + 1} of ${starts.length}…`);
+      const req = buildRequest({ at, backtest: true });
+      const res = await runModel(model, req.body, g);
+      const plain = covs ? await runModel(model, buildRequest({ at, backtest: true, covs: [] }).body, g) : null;
+      if (!res || g !== gen || (covs && !plain)) return;
+      backtested.rows.push({ at, s: score(req.actual, res.quantiles, req.context, m),
+                             s0: plain && score(req.actual, plain.quantiles, req.context, m) });
+      renderBacktest();
+    }
+    const secs = (performance.now() - t0) / 1000;
+    status(`Backtested ${starts.length} starts in ${secs.toFixed(secs < 10 ? 1 : 0)} s on this device.`);
+  } catch (err) {
+    if (g === gen) status(err.message, true);
+  } finally {
+    if (g === gen) $("#backtest").disabled = $("#run").disabled = false;
+  }
 }
 
 /* ---------- Wiring ---------- */
@@ -415,8 +468,12 @@ async function init() {
   });
 
   const drop = $("#drop");
-  const readFile = (f) => f && f.text().then((t) => { select(null); loadCSV(t, f.name); });
-  $("#file").addEventListener("change", (e) => readFile(e.target.files[0]));
+  // A file that fails to open leaves the current data, and its example button, as they were.
+  const readFile = (f) => f && f.text().then((t) => loadCSV(t, f.name) && select(null));
+  $("#file").addEventListener("change", (e) => {
+    readFile(e.target.files[0]);
+    e.target.value = ""; // so opening the same file again fires another change
+  });
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("over"));
   drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); readFile(e.dataTransfer.files[0]); });
@@ -427,6 +484,12 @@ async function init() {
   $("#model").addEventListener("change", () => armed && update());
   $("#form").addEventListener("submit", (e) => { e.preventDefault(); armed = true; clearTimeout(timer); run(); });
   $("#download").addEventListener("click", downloadCSV);
+  $("#backtest").addEventListener("click", backtest);
+  // A start in the backtest table moves the forecast start there.
+  $("#backtest-table").addEventListener("click", (e) => {
+    const i = origins.indexOf(+e.target.closest("button.link")?.closest("tr").dataset.at);
+    if (i >= 0) moveStart(i, true);
+  });
   $("#zoom-back").addEventListener("click", () => panBy(-0.5));
   $("#zoom-ahead").addEventListener("click", () => panBy(0.5));
   $("#zoom-in").addEventListener("click", () => zoomBy(0.5));

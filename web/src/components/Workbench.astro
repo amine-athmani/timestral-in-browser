@@ -79,10 +79,22 @@ const models = SERVER
     <fieldset class="cov" id="covariates-box">
       <legend>Covariates</legend>
       <div class="checks" id="covariates"></div>
-      <p class="hint">Columns the model can use to explain the forecast, like temperature or holidays.</p>
+      <p class="hint">
+        Columns the model can use to explain the forecast, like temperature or holidays. Keep “known ahead” for
+        columns you know in advance, like holidays or a planned promotion; switch it off for ones you only learn as
+        they happen, like measured weather, and the model sees only their history.
+      </p>
       <p class="effect" id="effect"></p>
     </fieldset>
     <dl class="metrics" id="metrics"></dl>
+    <section class="backtest" id="backtest-box" hidden>
+      <div class="backtest-head">
+        <p class="hint">One start can be lucky. Forecast from every start on the line and pool the errors.</p>
+        <button class="btn ghost small" type="button" id="backtest">Backtest every start</button>
+      </div>
+      <p class="effect" id="backtest-summary"></p>
+      <div class="table-wrap"><table id="backtest-table"></table></div>
+    </section>
     <p class="source" id="source"></p>
   </article>
 </section>

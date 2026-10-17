@@ -212,6 +212,13 @@ export function fanChart(el, { x, history, actual, q, future, split, dataEnd, vi
   return {
     setView,
     setStop,
+    /** Replace the extra lines' values (same count and colors) without rebuilding the chart. */
+    setLines: (next) => {
+      lines = next;
+      // Reset the scales so the y axis fits a higher plan, then put back the x range in view.
+      u.setData([x, history, actual, ...q, future, ...lines.map((l) => l.y)]);
+      if (set) u.setScale("x", set);
+    },
     focusStart: () => ((wantFocus = true), placeHandle()),
     getView: () => ({ min: u.scales.x.min, max: u.scales.x.max }),
     destroy: () => (ro.disconnect(), u.over.removeEventListener("wheel", onWheel), u.destroy()),

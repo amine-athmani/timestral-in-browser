@@ -9,16 +9,23 @@ const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i;
 export function parseNumber(v, decimal = ".") {
   if (v == null) return null;
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  let s = String(v).trim().replace(/[\s  ]/g, "");
+  if (decimal === "." && NUMBER.test(v)) return +v; // the common case, without the clean-up below
+  let s = String(v).trim().replace(/[\s\u00a0\u202f]/g, "");
   if (decimal === ",") s = s.replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".");
   return NUMBER.test(s) ? Number(s) : null;
 }
 
 const DMY = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
+const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}(?:\.\d+)?))?)?Z?$/;
 
 /** Unix milliseconds in UTC, or NaN. Dates like 05/03/2026 are read day first unless `dayFirst` is false. */
 export function parseTime(s, dayFirst = true) {
   const str = String(s ?? "").trim();
+  const iso = ISO.exec(str); // the common case, read directly as UTC
+  if (iso) {
+    const [y, mo, d, hh = 0, mm = 0, ss = 0] = iso.slice(1).map((x) => (x == null ? undefined : +x));
+    return mo >= 1 && mo <= 12 && d >= 1 && d <= 31 ? Date.UTC(y, mo - 1, d, hh, mm, 0, ss * 1000) : NaN;
+  }
   const m = DMY.exec(str);
   if (m) {
     const [a, b, y, hh = 0, mm = 0, ss = 0] = m.slice(1).map((x) => (x == null ? undefined : +x));
@@ -55,7 +62,7 @@ function isYears(name, values) {
 
 /** Parse CSV text into its header and raw rows: { fields, data, delimiter }. */
 export function readCSV(text) {
-  const { data, meta } = Papa.parse(String(text).replace(/^﻿/, ""), { header: true, skipEmptyLines: "greedy" });
+  const { data, meta } = Papa.parse(String(text).replace(/^\uFEFF/, ""), { header: true, skipEmptyLines: "greedy" });
   const fields = (meta.fields ?? []).filter((f) => f && f.trim());
   if (!data.length || !fields.length) throw new Error("This file has no rows or no header row.");
   return { fields, data, delimiter: meta.delimiter };
@@ -66,41 +73,41 @@ const share = (vals, test) => (vals.length ? vals.filter(test).length / vals.len
 
 /**
  * Work out what each column of a parsed CSV holds, over the whole file.
- * Returns { numeric, decimal, timeCol, times, groups }: the numeric columns to forecast and their decimal marks,
- * the time column and each raw row's time (unix seconds, NaN when invalid), and the text columns that name the
- * series of a long table (one row per time and series, like sales by store).
+ * Returns { numeric, values, timeCol, times, groups }: the numeric columns to forecast and each one's value per
+ * raw row (parsed once, null where blank or not a number), the time column and each raw row's time (unix seconds,
+ * NaN when invalid), and the text columns that name the series of a long table (one row per time and series,
+ * like sales by store).
  */
 export function inspect({ fields, data, delimiter }) {
   const filled = (f) => data.map((r) => r[f]).filter((v) => !isBlank(v));
 
-  // A decimal comma is only possible when commas do not separate the fields.
-  const decimal = {};
-  const numeric = fields.filter((f) => {
-    const vals = filled(f);
-    if (share(vals, (v) => parseNumber(v) != null) >= 0.8) return (decimal[f] = ".");
-    if (delimiter !== "," && share(vals, (v) => parseNumber(v, ",") != null) >= 0.8) return (decimal[f] = ",");
-    return false;
-  });
+  // A column is numeric when 80% of its filled cells are numbers. A decimal comma is only possible when commas do
+  // not separate the fields.
+  const values = {};
+  const numericWith = (f, decimal) => {
+    const vals = data.map((r) => parseNumber(r[f], decimal));
+    const filledCount = data.reduce((n, r) => n + !isBlank(r[f]), 0);
+    return filledCount && vals.reduce((n, v) => n + (v != null), 0) >= filledCount * 0.8 ? vals : null;
+  };
+  const numeric = fields.filter((f) => (values[f] = numericWith(f, ".") ?? (delimiter !== "," ? numericWith(f, ",") : null)));
 
   let timeCol = null, times = null;
   for (const f of fields) {
     if (numeric.includes(f)) continue;
     const vals = filled(f), df = dayFirst(vals);
-    if (share(vals, (v) => !Number.isNaN(parseTime(v, df))) >= 0.9) {
+    const ts = data.map((r) => (isBlank(r[f]) ? NaN : parseTime(r[f], df) / 1000));
+    if (vals.length && ts.reduce((n, t) => n + Number.isFinite(t), 0) >= vals.length * 0.9) {
       timeCol = f;
-      times = data.map((r) => parseTime(r[f], df) / 1000);
+      times = ts;
       break;
     }
   }
   if (!timeCol) {
-    timeCol = numeric.find((f) => isYears(f, filled(f).map((v) => parseNumber(v, decimal[f])).filter((v) => v != null))) ?? null;
-    if (timeCol) times = data.map((r) => {
-      const y = parseNumber(r[timeCol]);
-      return y == null ? NaN : Date.UTC(y, 0, 1) / 1000;
-    });
+    timeCol = numeric.find((f) => isYears(f, values[f].filter((v) => v != null))) ?? null;
+    if (timeCol) times = values[timeCol].map((y) => (y == null ? NaN : Date.UTC(y, 0, 1) / 1000));
   }
   const groups = fields.filter((f) => !numeric.includes(f) && f !== timeCol && isGroupColumn(data, f, times));
-  return { numeric: numeric.filter((f) => f !== timeCol), decimal, timeCol, times, groups };
+  return { numeric: numeric.filter((f) => f !== timeCol), values, timeCol, times, groups };
 }
 
 /**
@@ -129,7 +136,7 @@ export const groupKeys = ({ data }, f) => [...new Set(data.map((r) => String(r[f
  * Returns { fields, rows, timeCol, times, notes }: rows hold numbers or null, times are unix seconds or null,
  * notes are short remarks for the user (reordered rows, dropped rows, uneven steps).
  */
-export function buildTable({ data }, { numeric, decimal, timeCol, times }, group = null, key = null) {
+export function buildTable({ data }, { numeric, values, timeCol, times }, group = null, key = null) {
   if (!numeric.length) throw new Error("This file has no numeric columns.");
   const notes = [];
   let order = data.map((r, i) => i);
@@ -154,7 +161,7 @@ export function buildTable({ data }, { numeric, decimal, timeCol, times }, group
   }
   return {
     fields: numeric,
-    rows: order.map((i) => Object.fromEntries(numeric.map((f) => [f, parseNumber(data[i][f], decimal[f])]))),
+    rows: order.map((i) => Object.fromEntries(numeric.map((f) => [f, values[f][i]]))),
     timeCol,
     times: times ? order.map((i) => times[i]) : null,
     notes,

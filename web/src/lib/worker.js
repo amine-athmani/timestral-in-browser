@@ -2,9 +2,12 @@
 // out: progress, result, skipped or error.
 import * as ort from "onnxruntime-web/wasm";
 import wasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.wasm?url";
+import mjsUrl from "onnxruntime-web/ort-wasm-simd-threaded.mjs?url";
 import { forecast } from "./timestral.js";
 
-ort.env.wasm.wasmPaths = { wasm: wasmUrl }; // Vite serves the runtime as a hashed asset
+// Vite serves the runtime as hashed assets. The loader (.mjs) is needed too: with cross-origin isolation
+// onnxruntime runs several threads, and each thread worker loads it by URL.
+ort.env.wasm.wasmPaths = { wasm: wasmUrl, mjs: mjsUrl };
 
 const CACHE = "timestral-models-v1";
 const sessions = {};

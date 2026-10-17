@@ -4,7 +4,7 @@ import { fanChart, align } from "./chart.js";
 import { LEVELS, MAX_CONTEXT as BROWSER_CONTEXT } from "./timestral.js";
 import { readCSV, inspect, buildTable, groupKeys, season, median } from "./data.js";
 import { score, pool, change } from "./metrics.js";
-import { SERVICE_LEVELS, levelIndex, summarize, applyEdit, isActive, hasScenario, outlook } from "./plan.js";
+import { SERVICE_LEVELS, levelIndex, summarize, stepCorrelation, applyEdit, isActive, hasScenario, outlook } from "./plan.js";
 import { encodeSettings, decodeSettings } from "./settings.js";
 import { fmt, esc, pct, versus, naive, metricsHTML, backtestTableHTML, planTableHTML, scenarioEditsHTML, rankTableHTML } from "./views.js";
 import { printReport } from "./report.js";
@@ -23,7 +23,8 @@ let gen = 0; // bumped on every run; results from older runs are dropped
 let source = null; // the open file, parsed once: { name, example, csv, info }
 let group = { col: null, key: null }; // the series in view, for a long table with one row per time and series
 let table = null; // that series: { rows, times, name, season }; rows hold numbers or null
-let lastResult = null; // { req, q, full, alt, model }: shown and full quantiles, alt = the scenario forecast
+let lastResult = null; // { req, q, full, alt, rho, model }: shown and full quantiles, alt = the scenario forecast,
+// rho = how each forecast column's steps move together (null where nothing could be checked)
 let scenario = {}; // edits per known covariate, see plan.js
 let pending = null; // settings from a link to a file the user has not opened yet
 let armed = false; // after the first Run click, changes re-run the forecast on their own
@@ -143,7 +144,8 @@ function openSource(text, name, example = null, settings = null) {
   $("#group-col").innerHTML = `<option value="">None: one series</option>`
     + info.groups.map((g) => `<option${g === col ? " selected" : ""}>${esc(g)}</option>`).join("");
   $("#series-box").hidden = !info.groups.length;
-  selectGroup(col, settings?.key, settings ?? presetsOf(example));
+  // A link's settings win; what it leaves out comes from the example.
+  selectGroup(col, settings?.key, { ...presetsOf(example), ...settings });
   return true;
 }
 
@@ -172,9 +174,8 @@ function showTable(presets) {
   const valid = (list) => list?.filter((f) => fields.includes(f));
   const targets = valid(presets.t)?.length ? valid(presets.t) : [fields[0]];
   const covariates = valid(presets.c) ?? [];
-  // Covariates are known ahead unless the presets say otherwise; each one can be switched to past only. Links
-  // only list the selected covariates, so the others keep the default.
-  const known = (f) => !presets.k || presets.k.includes(f) || (presets.c && !presets.c.includes(f));
+  // Covariates are known ahead unless the presets say otherwise; each one can be switched to past only.
+  const known = (f) => !presets.k || presets.k.includes(f);
   const check = (f, name, on) =>
     `<label><input type="checkbox" name="${name}" value="${esc(f)}" ${on ? "checked" : ""}>${esc(f)}</label>`;
   $("#targets").innerHTML = fields.map((f) => check(f, "t", targets.includes(f))).join("");
@@ -185,6 +186,7 @@ function showTable(presets) {
   $("#horizon").value = presets.h ?? Math.max(1, Math.min(96, Math.floor(rows.length / 5)));
   if (presets.model && [...$("#model").options].some((o) => o.value === presets.model)) $("#model").value = presets.model;
   if (presets.level != null) $("#level").value = Math.max(0, SERVICE_LEVELS.indexOf(LEVELS[levelIndex(presets.level)]));
+  if (presets.agg === "sum" || presets.agg === "mean") $("#agg").value = presets.agg;
   if (presets.tab) setTab(presets.tab);
 
   const where = group.col ? `: ${group.key}` : "";
@@ -215,14 +217,26 @@ function syncColumns() {
 
 /* ---------- The forecast start ---------- */
 
-const col = (f, tbl = table) => tbl.rows.map((r) => r[f]);
+// Tables never change once built, so their columns and extents are worked out once.
+const columns = new WeakMap(); // table -> Map(column -> values)
+function col(f, tbl = table) {
+  if (!columns.has(tbl)) columns.set(tbl, new Map());
+  const memo = columns.get(tbl);
+  if (!memo.has(f)) memo.set(f, tbl.rows.map((r) => r[f]));
+  return memo.get(f);
+}
 /** Rows with data in the forecast columns (`end`), and all rows including trailing future covariates (`n`). */
 function extent(tbl = table) {
-  const t = picked("t").map((f) => col(f, tbl));
-  const n = tbl.rows.length;
-  let end = n;
-  while (end > 0 && t.every((s) => s[end - 1] == null)) end--;
-  return { n, end };
+  const targets = picked("t"), n = tbl.rows.length;
+  const key = `extent:${JSON.stringify(targets)}`;
+  const memo = columns.get(tbl) ?? columns.set(tbl, new Map()).get(tbl);
+  if (!memo.has(key)) {
+    const t = targets.map((f) => col(f, tbl));
+    let end = n;
+    while (end > 0 && t.every((s) => s[end - 1] == null)) end--;
+    memo.set(key, end);
+  }
+  return { n, end: memo.get(key) };
 }
 const horizon = () => Math.max(1, Math.round(+$("#horizon").value) || 1);
 
@@ -358,10 +372,10 @@ function runModel(model, request, g) {
   });
 }
 
-/** Draw the charts: the forecast in `q`, plus the plan line and the scenario median once there is a result. */
-function draw(req, q, result = null) {
+/** Each forecast column's chart data: the forecast in `q`, plus the plan line and the scenario median once run. */
+function chartSeries(req, q, result = null) {
   const level = serviceLevel(), k = levelIndex(level);
-  renderCharts(req.targets.map((label, v) => {
+  return req.targets.map((label, v) => {
     const lines = [];
     if (result) lines.push({ label: `Plan at ${pct(level)}`, values: result.full[v].map((qs) => qs[k]), color: "--plan", dash: [6, 3] });
     if (result?.alt) {
@@ -373,9 +387,17 @@ function draw(req, q, result = null) {
       label, view: req.view, stops: req.stops,
       ...align({ histX: req.histX, histY: req.hist[v], start: req.start, dataEnd: req.dataEnd, fcX: req.fcX, quantiles: q[v], lines }),
     };
-  }), req.isTime);
+  });
+}
+
+function draw(req, q, result = null) {
+  renderCharts(chartSeries(req, q, result), req.isTime);
+  syncLegend(result);
+}
+
+function syncLegend(result) {
   $("#legend-plan").hidden = !result;
-  $("#legend-plan span").textContent = `Plan at ${pct(level)}`;
+  $("#legend-plan span").textContent = `Plan at ${pct(serviceLevel())}`;
   $("#legend-scenario").hidden = !result?.alt;
 }
 
@@ -413,7 +435,8 @@ async function run() {
     // With a scenario, forecast again with the edited covariates.
     const alt = hasScenario(edits) ? await runModel(model, buildRequest({ edits }).body, g) : null;
     if (!res || g !== gen || (covs.length && hasActual && !plain) || (hasScenario(edits) && !alt)) return;
-    lastResult = { req, q: res.quantiles, full: res.full, alt, model };
+    const rho = req.targets.map((_, v) => stepCorrelation(req.actual[v], res.full[v]));
+    lastResult = { req, q: res.quantiles, full: res.full, alt, rho, model };
     draw(req, res.quantiles, lastResult);
     $("#meta").textContent = [`Timestral-${model}`, ...req.notes].join(" · ");
     const m = hasActual && score(req.actual, res.quantiles, req.context, table.season.m);
@@ -501,17 +524,24 @@ function renderPlan() {
     $("#plan-period").textContent = "Run a forecast to see what to plan for.";
     return;
   }
-  const { req, full, alt } = lastResult;
-  const level = serviceLevel(), mean = $("#agg").value === "mean";
+  const { req, full, alt, rho } = lastResult;
+  const level = serviceLevel(), mode = $("#agg").value;
   const from = req.ahead, to = req.fcX.length;
   const span = req.isTime ? `, ${timeLabel(req.fcX[from])} to ${timeLabel(req.fcX[to - 1])}` : "";
   $("#plan-period").textContent = `The next ${(to - from).toLocaleString()} steps past the end of the data${span}.`;
   const rows = req.targets.map((label, v) => ({
     label,
-    sum: summarize(full[v], from, to, level, mean ? "mean" : "sum"),
-    scenario: alt && summarize(alt.full[v], from, to, level, mean ? "mean" : "sum"),
+    sum: summarize(full[v], from, to, level, mode, rho[v] ?? 1),
+    scenario: alt && summarize(alt.full[v], from, to, level, mode, rho[v] ?? 1),
   }));
-  box.innerHTML = planTableHTML(rows, level, mean);
+  box.innerHTML = planTableHTML(rows, level, mode === "mean");
+  const checked = req.actual[0].filter((y) => y != null).length;
+  const measured = rho.filter((r) => r != null).map((r) => r.toFixed(2));
+  $("#plan-method").textContent = measured.length
+    ? `consecutive steps ran high or low together with a correlation of ${measured.join(" and ")} on the`
+      + ` ${checked.toLocaleString()} steps since the forecast start that can be checked.`
+    : "with nothing to check yet, they assume the steps all run high or low together, the widest case. Start the"
+      + " forecast before the end of the data to measure it.";
 }
 
 /* ---------- Scenario: change known covariates past the end of the data ---------- */
@@ -551,11 +581,11 @@ function renderScenarioSummary() {
   const edits = activeScenario();
   if (!hasScenario(edits)) return void (box.textContent = "");
   if (!lastResult?.alt) return void (box.textContent = armed ? "" : "Press Run forecast to compare the scenario.");
-  const { req, full, alt } = lastResult;
-  const mean = $("#agg").value === "mean", how = mean ? "average" : "total";
+  const { req, full, alt, rho } = lastResult;
+  const mode = $("#agg").value, how = mode === "mean" ? "average" : "total";
   box.innerHTML = req.targets.map((label, v) => {
-    const a = summarize(full[v], req.ahead, req.fcX.length, 0.5, mean ? "mean" : "sum");
-    const b = summarize(alt.full[v], req.ahead, req.fcX.length, 0.5, mean ? "mean" : "sum");
+    const a = summarize(full[v], req.ahead, req.fcX.length, 0.5, mode, rho[v] ?? 1);
+    const b = summarize(alt.full[v], req.ahead, req.fcX.length, 0.5, mode, rho[v] ?? 1);
     // Neither direction is better in general (fewer rentals on a holiday is not a failure), so no colors.
     const d = change(b.median, a.median);
     const diff = d == null ? "" : d === 0 ? ": about the same" : `: <b>${d > 0 ? "+" : ""}${d}%</b>`;
@@ -669,7 +699,8 @@ async function rankSeries() {
         const back = end - h >= 16 ? buildRequest({ tbl, at: end - h, backtest: true }) : null;
         const resBack = back && await runModel(model, back.body, g);
         if (!res || g !== gen || (back && !resBack)) return;
-        Object.assign(row, outlook(ahead.history[0], res.full[0], h),
+        const rho = back && stepCorrelation(back.actual[0], resBack.full[0]);
+        Object.assign(row, outlook(ahead.history[0], res.full[0], h, rho ?? 1),
           { mase: back ? score(back.actual.slice(0, 1), resBack.quantiles.slice(0, 1), back.context.slice(0, 1), tbl.season.m)?.mase ?? null : null });
       } catch (err) {
         if (g !== gen) return;
@@ -694,9 +725,9 @@ function currentSettings() {
   return {
     ...(source.example ? { ex: source.example.id } : { file: source.name }),
     group: group.col, key: group.key,
-    t: picked("t"), c: picked("c"), k: picked("k").filter((f) => picked("c").includes(f)),
+    t: picked("t"), c: picked("c"), k: picked("k"),
     h: horizon(), model: $("#model").value,
-    back: origins.length - 1 - origins.indexOf(cut), level: serviceLevel(), tab: activeTab(),
+    back: origins.length - 1 - origins.indexOf(cut), level: serviceLevel(), agg: $("#agg").value, tab: activeTab(),
     scenario: activeScenario(),
   };
 }
@@ -788,10 +819,13 @@ async function init() {
     if (tab) { setTab(tab.id.slice(4)); saveSettings(); }
   });
   document.querySelector('[role="tablist"]').addEventListener("keydown", onTabKey);
-  // The plan redraws from the last forecast: no new run needed.
+  // The plan redraws from the last forecast: no new run, and the charts only swap their plan line.
   const replan = () => {
     syncLevel();
-    if (lastResult) draw(lastResult.req, lastResult.q, lastResult);
+    if (lastResult) {
+      chartSeries(lastResult.req, lastResult.q, lastResult).forEach((s, v) => charts[v]?.setLines(s.lines));
+      syncLegend(lastResult);
+    }
     renderPlan();
     renderScenarioSummary();
     saveSettings();

@@ -126,9 +126,10 @@ const models = SERVER
       <p class="hint" id="plan-period">Run a forecast to see what to plan for.</p>
       <div class="table-wrap"><table class="data" id="plan-table"></table></div>
       <p class="hint">
-        The plan is each step's <output id="level-text">90%</output> quantile: enough to cover that step's value that
-        often. Ranges add up each step's range, which assumes the steps all run high or low together, so they are on
-        the wide side. Average for levels like temperature; add up for amounts like sales or visits.
+        On the chart, the plan line is each step's <output id="level-text">90%</output> quantile: enough for that step
+        that often. In the table, the plan covers the whole period's total that often. Totals come from 1,000 paths
+        simulated through the forecast; <span id="plan-method">how much the steps run high or low together is measured
+        where the forecast can be checked.</span> Average for levels like temperature; add up for amounts like sales.
       </p>
     </section>
 

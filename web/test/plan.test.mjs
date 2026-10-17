@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LEVELS } from "../src/lib/timestral.js";
-import { SERVICE_LEVELS, levelIndex, summarize, applyEdit, hasScenario, outlook } from "../src/lib/plan.js";
+import { SERVICE_LEVELS, levelIndex, summarize, normInv, stepCorrelation, applyEdit, hasScenario, outlook } from "../src/lib/plan.js";
 import { encodeSettings, decodeSettings } from "../src/lib/settings.js";
 
 // One forecast step whose quantile at each level is base + 100 * level, so every level is easy to read back.
@@ -23,6 +23,41 @@ test("summarize adds up each quantile over the period, or averages it", () => {
   assert.equal(s.high, s.plan);
   assert.equal(summarize(full, 0, 3, 0.5, "mean").median, 60);
   assert.equal(summarize(full, 3, 5, 0.5), null);
+});
+
+// A step forecast that is exactly standard normal, so totals have known answers.
+const normal = LEVELS.map((l) => normInv(l));
+const near = (a, b, tol) => assert.ok(Math.abs(a - b) <= tol, `${a} is not within ${tol} of ${b}`);
+
+test("normInv matches known normal quantiles", () => {
+  near(normInv(0.5), 0, 1e-9);
+  near(normInv(0.9), 1.2815516, 1e-6);
+  near(normInv(0.01), -2.3263479, 1e-6);
+});
+
+test("totals of independent steps grow with the square root of the steps", () => {
+  const full = Array.from({ length: 100 }, () => normal);
+  const s = summarize(full, 0, 100, 0.95, "sum", 0);
+  near(s.median, 0, 1.3); // 1,000 paths: the median of the total is good to about ±0.4 here
+  near(s.high, 1.2816 * 10, 1.3); // 80% range of a sum of 100 standard normals: ±1.28 * sqrt(100)
+  near(s.low, -1.2816 * 10, 1.3);
+  near(s.plan, 1.6449 * 10, 1.6);
+});
+
+test("totals of steps that move together add up the steps' quantiles", () => {
+  const full = Array.from({ length: 100 }, () => normal);
+  const s = summarize(full, 0, 100, 0.9, "sum", 1);
+  near(s.high, 1.2815516 * 100, 1e-3);
+  const mid = summarize(full, 0, 100, 0.9, "sum", 0.8);
+  assert.ok(mid.high > 12.8 && mid.high < 128, `rho 0.8 gives ${mid.high}`);
+  assert.deepEqual(summarize(full, 0, 100, 0.9, "sum", 0.8), mid); // seeded: the same every time
+});
+
+test("stepCorrelation reads how errors carry over", () => {
+  const full = Array.from({ length: 30 }, () => normal);
+  near(stepCorrelation(Array(30).fill(1.2816), full), 1, 1e-6); // high every step: all together
+  assert.equal(stepCorrelation(Array.from({ length: 30 }, (_, i) => (i % 2 ? 1 : -1)), full), 0); // alternating
+  assert.equal(stepCorrelation(Array(5).fill(1), full), null); // too few steps to tell
 });
 
 test("applyEdit sets or scales values past the end of the data, within the steps", () => {
@@ -50,6 +85,7 @@ test("settings survive a round trip through the URL hash", () => {
   assert.deepEqual(decodeSettings("#" + encodeSettings(s)), s);
   assert.deepEqual(decodeSettings(encodeSettings({ file: "my data.csv", group: "Store", key: "A & B" })),
                    { file: "my data.csv", group: "Store", key: "A & B" });
+  assert.deepEqual(decodeSettings(encodeSettings({ t: ["a"], k: [] })), { t: ["a"], k: [] });
   assert.equal(decodeSettings(""), null);
   assert.deepEqual(decodeSettings("#h=abc&scenario={"), {});
 });

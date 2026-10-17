@@ -65,8 +65,10 @@ The core idea: the ONNX graph is only **one decoding step**; the forecast loop l
   comma, time column from dates or years, text columns that name the series of a long table) and `buildTable` (one
   series, rows sorted by time). It also infers the seasonal cycle from the time step. `web/src/lib/metrics.js`
   scores forecasts: MAE, last-value and seasonal naive baselines, MASE, 80% coverage, and pooling across starts.
-  `web/src/lib/plan.js` works on the 21 quantiles: service levels, totals over a period (sum of per-step
-  quantiles, a deliberately wide range), scenario edits on known covariates, and the outlook used to rank series.
+  `web/src/lib/plan.js` works on the 21 quantiles: service levels, totals over a period (1,000 seeded paths
+  through the per-step quantiles, linked by an AR(1) Gaussian copula whose correlation `stepCorrelation` measures
+  from the checked steps; 1 when nothing can be checked), scenario edits on known covariates, and the outlook used
+  to rank series.
   `web/src/lib/settings.js` encodes the view in the URL hash. None of these touches the DOM.
 - `web/src/lib/views.js` returns HTML strings for the result panels (metrics, backtest, plan, scenario editor,
   series ranking); `web/src/lib/report.js` prints a report, redrawing the charts in the light theme

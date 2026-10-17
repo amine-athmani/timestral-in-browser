@@ -79,7 +79,7 @@ web/                    Astro site
   src/lib/app.js        the workbench: state, forecasting and wiring
   src/lib/data.js       CSV parsing, time column, series of a long table, seasonal cycle
   src/lib/metrics.js    forecast scores and naive baselines
-  src/lib/plan.js       service level, totals, scenarios, series outlook
+  src/lib/plan.js       service level, simulated totals, scenarios, series outlook
   src/lib/settings.js   settings in the URL hash, for shareable links
   src/lib/views.js      HTML for the result panels
   src/lib/report.js     printable report

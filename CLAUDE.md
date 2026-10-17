@@ -34,8 +34,8 @@ docker build -t timestral-demo .
 docker run --rm -p 8000:8000 -v timestral-cache:/cache timestral-demo
 ```
 
-There is no linter. `cd web && npm test` runs the unit tests in `web/test/` (`node --test`) for `data.js` and
-`metrics.js`; CI (`.github/workflows/ci.yml`) runs them plus both builds on every pull request. The parity script
+There is no linter. `cd web && npm test` runs the unit tests in `web/test/` (`node --test`) for the DOM-free
+modules (`data.js`, `metrics.js`, `plan.js`, `settings.js`); CI (`.github/workflows/ci.yml`) runs them plus both builds on every pull request. The parity script
 checks the model port (exit code 1 on failure). To run a single parity case, filter `fixtures` in
 `parity.test.mjs` by `fx.name` / `fx.model`.
 
@@ -61,11 +61,20 @@ The core idea: the ONNX graph is only **one decoding step**; the forecast loop l
 - `web/src/lib/config.js`: model URLs. Dev (or `PUBLIC_MODEL_BASE`) loads `web/public/models/`; production loads
   from the Hugging Face repos in `HF_ONNX` (`amine40/Timestral-{5M,28M}-ONNX`). `hf/` holds their model card and
   license.
-- `web/src/lib/data.js` parses CSVs (delimiter, decimal comma, time column from dates or years, rows sorted by
-  time) and infers the seasonal cycle from the time step. `web/src/lib/metrics.js` scores forecasts: MAE, last-value
-  and seasonal naive baselines, MASE, 80% coverage, and pooling across starts. Neither touches the DOM.
-- `web/src/lib/app.js` drives the workbench UI (`components/Workbench.astro`): target/covariate selection (each
-  covariate known ahead or past only, sent as `knownCovariates` / `pastCovariates`), the draggable forecast-start line drawn by `chart.js` (`origins`: stops one horizon apart,
+- `web/src/lib/data.js` parses CSVs in three steps: `readCSV` (Papa Parse), `inspect` (numeric columns and decimal
+  comma, time column from dates or years, text columns that name the series of a long table) and `buildTable` (one
+  series, rows sorted by time). It also infers the seasonal cycle from the time step. `web/src/lib/metrics.js`
+  scores forecasts: MAE, last-value and seasonal naive baselines, MASE, 80% coverage, and pooling across starts.
+  `web/src/lib/plan.js` works on the 21 quantiles: service levels, totals over a period (sum of per-step
+  quantiles, a deliberately wide range), scenario edits on known covariates, and the outlook used to rank series.
+  `web/src/lib/settings.js` encodes the view in the URL hash. None of these touches the DOM.
+- `web/src/lib/views.js` returns HTML strings for the result panels (metrics, backtest, plan, scenario editor,
+  series ranking); `web/src/lib/report.js` prints a report, redrawing the charts in the light theme
+  (`html[data-print]`) to capture them as images.
+- `web/src/lib/app.js` drives the workbench UI (`components/Workbench.astro`): the series picker for long tables,
+  target/covariate selection (each covariate known ahead or past only, sent as `knownCovariates` /
+  `pastCovariates`), the result tabs (Accuracy, Plan, Scenario, All series), the URL hash kept in sync with
+  `history.replaceState`, the draggable forecast-start line drawn by `chart.js` (`origins`: stops one horizon apart,
   ending at the end of the data), building the request, metrics vs. naive baselines, a second run without
   covariates to show their effect, and a backtest that forecasts `horizon` steps from every stop and pools the
   scores. The forecast always runs from the chosen start to `horizon` steps past the end

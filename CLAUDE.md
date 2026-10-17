@@ -35,7 +35,8 @@ docker run --rm -p 8000:8000 -v timestral-cache:/cache timestral-demo
 ```
 
 There is no linter. `cd web && npm test` runs the unit tests in `web/test/` (`node --test`) for the DOM-free
-modules (`data.js`, `metrics.js`, `plan.js`, `settings.js`); CI (`.github/workflows/ci.yml`) runs them plus both builds on every pull request. The parity script
+modules (`data.js`, `metrics.js`, `plan.js`, `settings.js`, `anomalies.js`, and the data helpers of
+`evolution.js`); CI (`.github/workflows/ci.yml`) runs them plus both builds on every pull request. The parity script
 checks the model port (exit code 1 on failure). To run a single parity case, filter `fixtures` in
 `parity.test.mjs` by `fx.name` / `fx.model`.
 
@@ -69,7 +70,12 @@ The core idea: the ONNX graph is only **one decoding step**; the forecast loop l
   through the per-step quantiles, linked by an AR(1) Gaussian copula whose correlation `stepCorrelation` measures
   from the checked steps; 1 when nothing can be checked), scenario edits on known covariates, and the outlook used
   to rank series.
-  `web/src/lib/settings.js` encodes the view in the URL hash. None of these touches the DOM.
+  `web/src/lib/settings.js` encodes the view in the URL hash. `web/src/lib/anomalies.js` flags checked points
+  outside a forecast's range, from the current run and the backtest windows. None of these touches the DOM.
+- `web/src/lib/evolution.js`: the Cycles and State space views that share the chart area with the timeline. Pure
+  helpers (`cycleOptions`, `placeIn`, `splitCycles`, `embed`, `embedForecast`) prepare the data; `evolutionView`
+  draws on a canvas and replays over about six seconds. State-space points accumulate on an offscreen layer so a
+  replay frame only draws the new ones.
 - `web/src/lib/views.js` returns HTML strings for the result panels (metrics, backtest, plan, scenario editor,
   series ranking); `web/src/lib/report.js` prints a report, redrawing the charts in the light theme
   (`html[data-print]`) to capture them as images.

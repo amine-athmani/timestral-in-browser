@@ -172,6 +172,13 @@ const arrow = (x, y, dx) => { const s = Math.sign(dx) * 7; return `M${x} ${y}h${
       <li><b>Print report</b> lays out the chart, the plan, the scenario and the scores on a page; the print dialog can save it as a PDF. <b>Copy link</b> copies a link that reopens the same view: dataset, series, columns, start, service level and scenario. For your own file the link holds its name and settings, never the data, so whoever opens it needs the file too.</li>
     </ul>
 
+    <h2>Anomalies and how a series changes</h2>
+    <ul>
+      <li><b>Anomalies</b> are points that fell outside the range a forecast gave them (98%, 90% or 80%), wherever a forecast can be checked against what happened: from the current start, and from every backtest start after <b>Scan more of the history</b>. They show as red circles on the timeline and in a list, most unusual first; click one to zoom to it. The page also says how many to expect by chance alone, about 2 in 100 for the 98% range, so a handful is normal. On the bike data the top ones are Christmas Eve and Thanksgiving evening.</li>
+      <li><b>Cycles</b> lays every day, week or year over the same axis. Older cycles fade, so you see the usual shape and how it drifts; <b>Replay</b> draws them one after another. The forecast's cycles past the end of the data come last, in blue with their 80% range, so you see where the shape goes next.</li>
+      <li><b>State space</b> plots each value against the one before it (or one cycle before). A steady series sits on the dashed diagonal; daily rhythms trace loops. Replay moves along the path through time, and the forecast continues it in blue, with each step's 80% range as a whisker.</li>
+    </ul>
+
     <h2>Limits and license</h2>
     <ul>
       <li>Up to 1,024 steps ahead per run, 8 forecast columns and 8 covariates.</li>

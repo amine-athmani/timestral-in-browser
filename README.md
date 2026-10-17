@@ -6,7 +6,8 @@ and with what comes next.
 
 It also helps plan with the forecast: choose a service level and read the totals for the next period, try
 "what if" scenarios on covariates you know ahead, forecast and rank every series of a long table (sales by store,
-views by article), print a report, or copy a link that reopens the same view.
+views by article), flag anomalies, watch the series' cycles and state space replay with the forecast in them,
+print a report, or copy a link that reopens the same view.
 
 It runs two ways:
 
@@ -80,6 +81,8 @@ web/                    Astro site
   src/lib/data.js       CSV parsing, time column, series of a long table, seasonal cycle
   src/lib/metrics.js    forecast scores and naive baselines
   src/lib/plan.js       service level, simulated totals, scenarios, series outlook
+  src/lib/anomalies.js  points outside the forecast's range
+  src/lib/evolution.js  cycles and state-space views with replay
   src/lib/settings.js   settings in the URL hash, for shareable links
   src/lib/views.js      HTML for the result panels
   src/lib/report.js     printable report

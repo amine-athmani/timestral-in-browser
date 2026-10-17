@@ -32,7 +32,10 @@ them first (next section).
 cd web
 npm install
 npm run dev        # http://localhost:4321
+npm test           # unit tests for CSV parsing and scoring
 ```
+
+Pull requests run the unit tests and both site builds (`.github/workflows/ci.yml`).
 
 ## Export the models
 
@@ -69,6 +72,9 @@ Push to GitHub and set Settings → Pages → Source to **GitHub Actions**. Ever
 web/                    Astro site
   src/lib/timestral.js  JS port of the official forecast function
   src/lib/worker.js     runs the ONNX model in a Web Worker
+  src/lib/data.js       CSV parsing, time column and seasonal cycle
+  src/lib/metrics.js    forecast scores and naive baselines
+  test/                 unit tests (node --test)
 server/                 FastAPI server for the Docker image
 scripts/                ONNX export and example datasets
 tests/parity/           browser forecaster vs. Python package

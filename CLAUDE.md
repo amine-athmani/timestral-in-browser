@@ -34,8 +34,10 @@ docker build -t timestral-demo .
 docker run --rm -p 8000:8000 -v timestral-cache:/cache timestral-demo
 ```
 
-There is no linter and no unit test runner; the parity script is the test suite (exit code 1 on failure).
-To run a single parity case, filter `fixtures` in `parity.test.mjs` by `fx.name` / `fx.model`.
+There is no linter. `cd web && npm test` runs the unit tests in `web/test/` (`node --test`) for `data.js` and
+`metrics.js`; CI (`.github/workflows/ci.yml`) runs them plus both builds on every pull request. The parity script
+checks the model port (exit code 1 on failure). To run a single parity case, filter `fixtures` in
+`parity.test.mjs` by `fx.name` / `fx.model`.
 
 `onnx/`, `web/public/models/` and `tests/parity/fixtures.json` are generated and git-ignored.
 
@@ -59,10 +61,14 @@ The core idea: the ONNX graph is only **one decoding step**; the forecast loop l
 - `web/src/lib/config.js`: model URLs. Dev (or `PUBLIC_MODEL_BASE`) loads `web/public/models/`; production loads
   from the Hugging Face repos in `HF_ONNX` (`amine40/Timestral-{5M,28M}-ONNX`). `hf/` holds their model card and
   license.
-- `web/src/lib/app.js` drives the workbench UI (`components/Workbench.astro`): CSV parsing (time column
-  auto-detected), target/covariate selection, the draggable forecast-start line drawn by `chart.js` (`origins`: stops one horizon apart,
-  ending at the end of the data), building the request, metrics vs. a naive baseline, and a second run without
-  covariates to show their effect. The forecast always runs from the chosen start to `horizon` steps past the end
+- `web/src/lib/data.js` parses CSVs (delimiter, decimal comma, time column from dates or years, rows sorted by
+  time) and infers the seasonal cycle from the time step. `web/src/lib/metrics.js` scores forecasts: MAE, last-value
+  and seasonal naive baselines, MASE, 80% coverage, and pooling across starts. Neither touches the DOM.
+- `web/src/lib/app.js` drives the workbench UI (`components/Workbench.astro`): target/covariate selection (each
+  covariate known ahead or past only, sent as `knownCovariates` / `pastCovariates`), the draggable forecast-start line drawn by `chart.js` (`origins`: stops one horizon apart,
+  ending at the end of the data), building the request, metrics vs. naive baselines, a second run without
+  covariates to show their effect, and a backtest that forecasts `horizon` steps from every stop and pools the
+  scores. The forecast always runs from the chosen start to `horizon` steps past the end
   of the data, so earlier starts both backtest and predict ahead. Same request shape goes to the worker or to
   `POST /api/forecast`.
 - `web/src/lib/chart.js`: uPlot fan chart. `align()` lays history, actuals, quantile bands (q10/q25/q50/q75/q90)

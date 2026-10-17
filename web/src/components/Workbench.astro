@@ -23,13 +23,26 @@ const models = SERVER
       <label class="drop" id="drop">
         <input type="file" id="file" accept=".csv,.tsv,.txt,text/csv">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-        <span><b>Open a CSV file</b> or drop it here. One row per time step.</span>
+        <span><b>Open a CSV file</b> or drop it here. One row per time step, or per time and series.</span>
       </label>
+      <div class="row series" id="series-box" hidden>
+        <label>Series column <select id="group-col"></select></label>
+        <label>Series <select id="group-key"></select></label>
+      </div>
     </fieldset>
 
     <fieldset>
       <legend>Columns to forecast</legend>
       <div class="checks" id="targets"></div>
+    </fieldset>
+
+    <fieldset id="covariates-box">
+      <legend>Covariates</legend>
+      <div class="checks" id="covariates"></div>
+      <p class="hint">
+        Columns that help explain the forecast. Keep “known ahead” for what you know in advance, like holidays or a
+        planned promotion; switch it off for what you only learn as it happens, like measured weather.
+      </p>
     </fieldset>
 
     <div class="row">
@@ -51,7 +64,11 @@ const models = SERVER
         <h2 id="title"></h2>
         <p class="muted" id="blurb"></p>
       </div>
-      <button class="btn ghost small" type="button" id="download" hidden>Download CSV</button>
+      <div class="actions">
+        <button class="btn ghost small" type="button" id="download" hidden>Download CSV</button>
+        <button class="btn ghost small" type="button" id="report" hidden>Print report</button>
+        <button class="btn ghost small" type="button" id="share" title="Copy a link that reopens this view">Copy link</button>
+      </div>
     </div>
     <div class="chart-bar">
       <p class="start-label"><span class="meta">Forecast from</span> <output id="origin-label"></output></p>
@@ -75,26 +92,66 @@ const models = SERVER
       <li><i class="l-ahead"></i>Past the end of the data</li>
       <li><i class="l-band"></i>50% and 80% ranges</li>
       <li><i class="l-end"></i>End of the data</li>
+      <li id="legend-plan" hidden><i class="l-plan"></i><span>Plan level</span></li>
+      <li id="legend-scenario" hidden><i class="l-scenario"></i>Scenario median</li>
     </ul>
-    <fieldset class="cov" id="covariates-box">
-      <legend>Covariates</legend>
-      <div class="checks" id="covariates"></div>
-      <p class="hint">
-        Columns the model can use to explain the forecast, like temperature or holidays. Keep “known ahead” for
-        columns you know in advance, like holidays or a planned promotion; switch it off for ones you only learn as
-        they happen, like measured weather, and the model sees only their history.
-      </p>
+    <div class="tabs" role="tablist" aria-label="Results">
+      <button type="button" role="tab" id="tab-accuracy" aria-controls="panel-accuracy" aria-selected="true">Accuracy</button>
+      <button type="button" role="tab" id="tab-plan" aria-controls="panel-plan" aria-selected="false" tabindex="-1">Plan</button>
+      <button type="button" role="tab" id="tab-scenario" aria-controls="panel-scenario" aria-selected="false" tabindex="-1">Scenario</button>
+      <button type="button" role="tab" id="tab-series" aria-controls="panel-series" aria-selected="false" tabindex="-1" hidden>All series</button>
+    </div>
+
+    <section class="panel" role="tabpanel" id="panel-accuracy" aria-labelledby="tab-accuracy">
+      <p class="hint" id="accuracy-empty">Run a forecast from an earlier start to compare it with what happened.</p>
+      <dl class="metrics" id="metrics"></dl>
       <p class="effect" id="effect"></p>
-    </fieldset>
-    <dl class="metrics" id="metrics"></dl>
-    <section class="backtest" id="backtest-box" hidden>
-      <div class="backtest-head">
-        <p class="hint">One start can be lucky. Forecast from every start on the line and pool the errors.</p>
-        <button class="btn ghost small" type="button" id="backtest">Backtest every start</button>
+      <div class="backtest" id="backtest-box" hidden>
+        <div class="panel-head">
+          <p class="hint">One start can be lucky. Forecast from every start on the line and pool the errors.</p>
+          <button class="btn ghost small" type="button" id="backtest">Backtest every start</button>
+        </div>
+        <p class="effect" id="backtest-summary"></p>
+        <div class="table-wrap"><table class="data" id="backtest-table"></table></div>
       </div>
-      <p class="effect" id="backtest-summary"></p>
-      <div class="table-wrap"><table id="backtest-table"></table></div>
     </section>
+
+    <section class="panel" role="tabpanel" id="panel-plan" aria-labelledby="tab-plan" hidden>
+      <div class="panel-head plan-controls">
+        <label class="level">Plan for <input type="range" id="level" min="0" max="10" step="1" value="8">
+          <output id="level-label">90%</output></label>
+        <label>Over the period
+          <select id="agg"><option value="sum">add up</option><option value="mean">average</option></select></label>
+      </div>
+      <p class="hint" id="plan-period">Run a forecast to see what to plan for.</p>
+      <div class="table-wrap"><table class="data" id="plan-table"></table></div>
+      <p class="hint">
+        The plan is each step's <output id="level-text">90%</output> quantile: enough to cover that step's value that
+        often. Ranges add up each step's range, which assumes the steps all run high or low together, so they are on
+        the wide side. Average for levels like temperature; add up for amounts like sales or visits.
+      </p>
+    </section>
+
+    <section class="panel" role="tabpanel" id="panel-scenario" aria-labelledby="tab-scenario" hidden>
+      <p class="hint" id="scenario-intro"></p>
+      <div class="edits" id="scenario-edits"></div>
+      <div class="panel-head">
+        <p class="effect" id="scenario-summary"></p>
+        <button class="btn ghost small" type="button" id="scenario-reset" hidden>Clear the scenario</button>
+      </div>
+    </section>
+
+    <section class="panel" role="tabpanel" id="panel-series" aria-labelledby="tab-series" hidden>
+      <div class="panel-head">
+        <p class="hint" id="rank-intro">Forecast every series from the end of its data with these settings, and rank them.</p>
+        <button class="btn ghost small" type="button" id="rank">Forecast every series</button>
+      </div>
+      <div class="table-wrap"><table class="data" id="rank-table"></table></div>
+    </section>
+
     <p class="source" id="source"></p>
   </article>
 </section>
+
+<!-- Filled and printed by "Print report"; hidden on screen. -->
+<section class="report" id="report-sheet" aria-hidden="true"></section>

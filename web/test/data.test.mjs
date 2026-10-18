@@ -99,3 +99,28 @@ test("season follows the time step", () => {
   assert.deepEqual(season(Array.from({ length: 30 }, (_, i) => Date.UTC(2000, i, 1) / 1000)), { m: 12, name: "year" });
   assert.deepEqual(season(null), { m: 1, name: null });
 });
+
+test("series names that V8 reads as dates are not taken as the time column", () => {
+  for (const s of ["Store 12", "Region 1", "Paris 2", "item-2024"]) assert.ok(Number.isNaN(parseTime(s)), s);
+  for (const s of ["2024-01", "Jan 5, 2024", "5 January 2024", "2024-01-01T00:00:00+01:00"]) assert.ok(Number.isFinite(parseTime(s)), s);
+  const rows = ["store,date,sales"];
+  for (let s = 1; s <= 3; s++) days(10).forEach((d, i) => rows.push(`Store ${s},${d.toISOString().slice(0, 10)},${s * 10 + i}`));
+  const info = inspect(readCSV(rows.join("\n")));
+  assert.equal(info.timeCol, "date");
+  assert.deepEqual(info.groups, ["store"]);
+});
+
+test("a year column is the time axis of a long table too", () => {
+  const rows = ["year,country,value"];
+  for (const c of ["FR", "DE"]) for (let y = 2000; y < 2012; y++) rows.push(`${y},${c},${y % 7}`);
+  const info = inspect(readCSV(rows.join("\n")));
+  assert.equal(info.timeCol, "year");
+  assert.deepEqual(info.groups, ["country"]);
+  assert.deepEqual(info.numeric, ["value"]);
+});
+
+test("in a file with decimal commas, dots group thousands", () => {
+  const { rows } = parseTable("date;units;price\n01/02/2026;1.234;2,5\n02/02/2026;980;3,5\n03/02/2026;2.001;1");
+  assert.deepEqual(rows.map((r) => r.units), [1234, 980, 2001]);
+  assert.deepEqual(rows.map((r) => r.price), [2.5, 3.5, 1]);
+});

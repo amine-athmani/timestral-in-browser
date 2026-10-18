@@ -18,6 +18,13 @@ export function parseNumber(v, decimal = ".") {
 const DMY = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
 const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}(?:\.\d+)?))?)?Z?$/;
 
+const MONTH = "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?";
+const LOOKS_LIKE_DATE = [
+  /^\d{4}[-/.]\d{1,2}([-/.]\d{1,2})?([ T].*)?$/, // 2024-01, 2024/01/05, 2024-01-05T10:00+01:00
+  /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}([ T].*)?$/, // 05/01/24
+  new RegExp(`^(\\w+,? )?(\\d{1,2}(st|nd|rd|th)? ${MONTH},? \\d{4}|${MONTH} \\d{1,2}(st|nd|rd|th)?,? \\d{4})([ T].*)?$`, "i"), // 5 Jan 2024, Mon, Jan 5 2024
+];
+
 /** Unix milliseconds in UTC, or NaN. Dates like 05/03/2026 are read day first unless `dayFirst` is false. */
 export function parseTime(s, dayFirst = true) {
   const str = String(s ?? "").trim();
@@ -33,6 +40,8 @@ export function parseTime(s, dayFirst = true) {
     if (mo < 1 || mo > 12 || d < 1 || d > 31) return NaN;
     return Date.UTC(y, mo - 1, d, hh, mm, ss);
   }
+  // Date.parse reads many plain labels as dates ("Store 12", "Region 1"), so only hand it strings shaped like one.
+  if (!LOOKS_LIKE_DATE.some((re) => re.test(str))) return NaN;
   let t = str.replace(" ", "T");
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) t += "T00:00";
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(t)) t += "Z";
@@ -52,12 +61,16 @@ function dayFirst(values) {
   return first || !second;
 }
 
-/** A numeric column of years: whole numbers in 1000-2999, one per row, named like a year or one apart. */
+/**
+ * A numeric column of years: whole numbers in 1000-2999, either named like a year (repeats allowed, as in a long
+ * table with one row per year and series) or one per row and one apart.
+ */
 function isYears(name, values) {
   if (values.length < 2 || !values.every((v) => Number.isInteger(v) && v >= 1000 && v <= 2999)) return false;
-  const sorted = [...values].sort((a, b) => a - b);
-  if (sorted.some((v, i) => i && v === sorted[i - 1])) return false;
-  return /^(year|yr|years|année|annee|año|jahr)$/i.test(name.trim()) || sorted.every((v, i) => !i || v - sorted[i - 1] === 1);
+  const distinct = [...new Set(values)].sort((a, b) => a - b);
+  if (distinct.length < 2) return false;
+  if (/^(year|yr|years|année|annee|año|jahr)$/i.test(name.trim())) return true;
+  return distinct.length === values.length && distinct.every((v, i) => !i || v - distinct[i - 1] === 1);
 }
 
 /** Parse CSV text into its header and raw rows: { fields, data, delimiter }. */
@@ -90,6 +103,10 @@ export function inspect({ fields, data, delimiter }) {
     return filledCount && vals.reduce((n, v) => n + (v != null), 0) >= filledCount * 0.8 ? vals : null;
   };
   const numeric = fields.filter((f) => (values[f] = numericWith(f, ".") ?? (delimiter !== "," ? numericWith(f, ",") : null)));
+  // A file with decimal commas in one column uses them everywhere, so its dots group thousands: in such a file
+  // "1.234" in a column without commas is 1234, not 1.234.
+  const commaFile = delimiter !== "," && numeric.some((f) => data.some((r) => /\d,\d/.test(r[f] ?? "")));
+  if (commaFile) for (const f of numeric) values[f] = numericWith(f, ",") ?? values[f];
 
   let timeCol = null, times = null;
   for (const f of fields) {

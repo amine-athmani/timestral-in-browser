@@ -43,6 +43,9 @@ test("pool weights by points and change handles a zero baseline", () => {
   assert.equal(p.mae, 3.25);
   assert.equal(p.coverage, 0.25);
   assert.equal(p.mase, 0.5);
+  // MASE is weighted by points like the rest.
+  assert.equal(pool([{ mae: 1, naive: 1, seasonal: 1, coverage: 1, count: 1, mase: 2 },
+                     { mae: 1, naive: 1, seasonal: 1, coverage: 1, count: 3, mase: 1 }]).mase, 1.25);
   assert.equal(change(8, 10), -20);
   assert.equal(change(1, 0), null);
 });

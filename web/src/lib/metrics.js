@@ -63,7 +63,7 @@ export function pool(scores) {
   const mases = ok.filter((x) => x.mase != null);
   return {
     mae: mean("mae"), naive: mean("naive"), seasonal: mean("seasonal"), coverage: mean("coverage"), count,
-    mase: mases.length ? mases.reduce((s, x) => s + x.mase, 0) / mases.length : null,
+    mase: mases.length ? mases.reduce((s, x) => s + x.mase * x.count, 0) / mases.reduce((s, x) => s + x.count, 0) : null,
   };
 }
 

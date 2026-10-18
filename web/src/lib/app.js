@@ -617,6 +617,7 @@ function renderScenarioSummary() {
 /* ---------- Backtest: forecast from every start and pool the scores ---------- */
 
 let backtested = null; // { key, rows: [{ at, s, s0 }], total, model, covs }
+let backtestRun = -1; // the run that disabled the backtest buttons; a newer run can stop it, so it re-enables them
 
 // Results hold while the data, columns, horizon and model stay the same; moving the start keeps them. The series
 // ranking also holds when another series of the same file is shown.
@@ -658,7 +659,8 @@ async function backtest() {
   const model = $("#model").value, covs = picked("c").length > 0, m = table.season.m;
   backtested = { key: resultKey(), rows: [], total: starts.length, model, covs };
   renderBacktest();
-  $("#backtest").disabled = $("#run").disabled = true;
+  backtestRun = g;
+  $("#backtest").disabled = $("#anomaly-scan").disabled = $("#run").disabled = true;
   const t0 = performance.now();
   try {
     for (const [k, at] of starts.entries()) {
@@ -679,7 +681,8 @@ async function backtest() {
   } catch (err) {
     if (g === gen) status(err.message, true);
   } finally {
-    if (g === gen) $("#backtest").disabled = $("#run").disabled = false;
+    if (backtestRun === g) $("#backtest").disabled = $("#anomaly-scan").disabled = false;
+    if (g === gen) $("#run").disabled = false;
   }
 }
 
@@ -687,6 +690,7 @@ async function backtest() {
 
 const MAX_SERIES = 100;
 let ranked = null; // { key, rows: [{ name, last, next, growth, spread, mase, error }], total, sort, target }
+let rankRun = -1; // the run that disabled the rank button, as for the backtest
 
 function syncRanking() {
   if (ranked && ranked.key !== resultKey(false)) ranked = null;
@@ -707,6 +711,7 @@ async function rankSeries() {
   clearTimeout(timer);
   const g = ++gen;
   ranked = { key: resultKey(false), rows: [], total: todo.length, sort: ranked?.sort ?? { by: "growth", dir: -1 } };
+  rankRun = g;
   $("#rank").disabled = $("#run").disabled = true;
   const t0 = performance.now();
   try {
@@ -738,7 +743,8 @@ async function rankSeries() {
   } catch (err) {
     if (g === gen) status(err.message, true);
   } finally {
-    if (g === gen) $("#rank").disabled = $("#run").disabled = false;
+    if (rankRun === g) $("#rank").disabled = false;
+    if (g === gen) $("#run").disabled = false;
   }
 }
 
@@ -1046,13 +1052,25 @@ async function init() {
   $("#zoom-reset").addEventListener("click", resetView);
 
   // A link opens its example with its settings; a link to a file waits for that file.
-  const settings = decodeSettings(location.hash);
-  const linked = settings?.ex && $(`#sources button[data-id="${CSS.escape(settings.ex)}"]`);
-  if (settings?.file) pending = settings;
-  await openExample(linked || $("#sources button[data-id]"), linked ? settings : null);
-  if (pending) status(`This link has settings for ${pending.file}. Open that file to apply them.`);
-  // A link pasted into this tab only changes the hash; start over from it. (replaceState above fires no event.)
-  addEventListener("hashchange", () => location.reload());
+  const openLink = async (settings, fallback) => {
+    const linked = settings?.ex && $(`#sources button[data-id="${CSS.escape(settings.ex)}"]`);
+    pending = settings?.file ? settings : null;
+    if (linked || fallback) await openExample(linked || fallback, linked ? settings : null);
+    if (pending) status(`This link has settings for ${pending.file}. Open that file to apply them.`);
+  };
+  await openLink(decodeSettings(location.hash), $("#sources button[data-id]"));
+  // A link pasted into this tab only changes the hash (replaceState fires no event). Apply it in place, so the
+  // results already computed stay when the hash holds no settings, like a plain #anchor.
+  addEventListener("hashchange", () => {
+    const settings = decodeSettings(location.hash);
+    if (!settings?.ex && !settings?.file) return;
+    clearTimeout(timer);
+    gen++; // drop whatever is still running for the previous view
+    backtested = ranked = null;
+    armed = false;
+    $("#run").disabled = false;
+    openLink(settings, null);
+  });
 }
 
 init();

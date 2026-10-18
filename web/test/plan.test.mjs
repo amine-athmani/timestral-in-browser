@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { LEVELS } from "../src/lib/timestral.js";
 import { SERVICE_LEVELS, levelIndex, summarize, normInv, stepCorrelation, applyEdit, hasScenario, outlook } from "../src/lib/plan.js";
 import { encodeSettings, decodeSettings } from "../src/lib/settings.js";
+import { scenarioEditsHTML } from "../src/lib/views.js";
 
 // One forecast step whose quantile at each level is base + 100 * level, so every level is easy to read back.
 const step = (base) => LEVELS.map((l) => base + 100 * l);
@@ -88,4 +89,14 @@ test("settings survive a round trip through the URL hash", () => {
   assert.deepEqual(decodeSettings(encodeSettings({ t: ["a"], k: [] })), { t: ["a"], k: [] });
   assert.equal(decodeSettings(""), null);
   assert.deepEqual(decodeSettings("#h=abc&scenario={"), {});
+});
+
+test("a scenario from a link keeps only known modes and numbers, so it cannot inject HTML", () => {
+  const evil = '"><img src=x onerror=alert(1)>';
+  const s = decodeSettings(encodeSettings({ ex: "bike", scenario: {
+    holiday: { mode: "set", value: evil, from: evil, to: 5 }, temp: { mode: "<b>", value: 1 }, hum: "x" } }));
+  assert.deepEqual(s.scenario, { holiday: { mode: "set", value: null, from: 1, to: 5 } });
+  assert.ok(!scenarioEditsHTML([{ col: "holiday", edit: s.scenario.holiday, future: 0 }], 24).includes("<img"));
+  // Even an edit that skipped decoding is escaped where it is written.
+  assert.ok(!scenarioEditsHTML([{ col: "holiday", edit: { mode: "set", value: evil, from: evil }, future: 0 }], 24).includes("<img"));
 });

@@ -20,6 +20,17 @@ export function encodeSettings(s) {
   return p.toString();
 }
 
+const MODES = ["file", "set", "change"];
+const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** A scenario from a link, keeping only known modes and numbers: the page writes it into its HTML. */
+function cleanScenario(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  return Object.fromEntries(Object.entries(raw)
+    .filter(([, e]) => e && typeof e === "object" && MODES.includes(e.mode))
+    .map(([col, e]) => [col, { mode: e.mode, value: num(e.value), from: num(e.from) ?? 1, to: num(e.to) }]));
+}
+
 /** The settings in a URL hash (with or without the "#"), or null when there are none or they are unreadable. */
 export function decodeSettings(hash) {
   const p = new URLSearchParams(String(hash ?? "").replace(/^#/, ""));
@@ -28,7 +39,7 @@ export function decodeSettings(hash) {
   for (const [name, value] of p) {
     if (LISTS.includes(name)) { s[name] ??= []; if (value) s[name].push(value); }
     else if (NUMBERS.includes(name)) { if (Number.isFinite(+value)) s[name] = +value; }
-    else if (name === "scenario") { try { s.scenario = JSON.parse(value); } catch { /* ignore a broken scenario */ } }
+    else if (name === "scenario") { try { s.scenario = cleanScenario(JSON.parse(value)); } catch { /* ignore a broken scenario */ } }
     else s[name] = value;
   }
   return s;

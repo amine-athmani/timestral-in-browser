@@ -71,9 +71,9 @@ export function scenarioEditsHTML(edits, h) {
     return `<div class="edit" data-col="${esc(col)}">
       <span class="edit-name">${esc(col)}</span>
       <select data-key="mode" aria-label="How to change ${esc(col)}">${option("file", "as in the file")}${option("set", "set to")}${option("change", "change by %")}</select>
-      <input type="number" step="any" data-key="value" aria-label="Value" value="${edit.value ?? ""}"${off ? " disabled" : ""}>
-      <span class="edit-steps">steps <input type="number" min="1" max="${h}" data-key="from" aria-label="From step" value="${edit.from ?? 1}"${off ? " disabled" : ""}>
-      to <input type="number" min="1" max="${h}" data-key="to" aria-label="To step" value="${Math.min(edit.to ?? h, h)}"${off ? " disabled" : ""}></span>
+      <input type="number" step="any" data-key="value" aria-label="Value" value="${esc(edit.value ?? "")}"${off ? " disabled" : ""}>
+      <span class="edit-steps">steps <input type="number" min="1" max="${h}" data-key="from" aria-label="From step" value="${esc(edit.from ?? 1)}"${off ? " disabled" : ""}>
+      to <input type="number" min="1" max="${h}" data-key="to" aria-label="To step" value="${esc(Math.min(edit.to ?? h, h))}"${off ? " disabled" : ""}></span>
       ${note}
     </div>`;
   }).join("");

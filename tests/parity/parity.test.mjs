@@ -3,6 +3,7 @@
 // SITE=1 checks the fp16-stored files the website serves, with a looser tolerance.
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { forecast } from "../../web/src/lib/timestral.js";
 
 const ort = createRequire(new URL("../../web/package.json", import.meta.url))("onnxruntime-node");
@@ -14,7 +15,8 @@ const sessions = {};
 let failed = 0;
 
 for (const fx of fixtures) {
-  sessions[fx.model] ??= await ort.InferenceSession.create(new URL(`${dir}timestral-${fx.model.toLowerCase()}.onnx`, import.meta.url).pathname);
+  // fileURLToPath, not URL.pathname: that one breaks on Windows drive letters and on spaces in the path.
+  sessions[fx.model] ??= await ort.InferenceSession.create(fileURLToPath(new URL(`${dir}timestral-${fx.model.toLowerCase()}.onnx`, import.meta.url)));
   const t0 = performance.now();
   const { quantiles } = await forecast(ort, sessions[fx.model], {
     target: fx.target, horizon: fx.horizon, pastCovariates: fx.pastCovariates, knownCovariates: fx.knownCovariates,

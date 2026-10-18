@@ -145,14 +145,39 @@ const arrow = (x, y, dx) => { const s = Math.sign(dx) * 7; return `M${x} ${y}h${
       <li>Drag across a chart to zoom in, and double-click it to go back. The buttons above the charts move back and forward in time, zoom out, or show all the data. Ctrl or ⌘ with the scroll wheel (or a pinch) zooms; Shift with the wheel (or a sideways swipe) moves along the time axis.</li>
       <li>Every forecast runs to the same place: the end of the data plus the steps ahead. The gray area is the history the model sees. Everything after the forecast start stays clear, up to the dashed line at the end of the data; past it there is nothing to check against, so the median is dotted there.</li>
       <li><b>Average error</b> is the mean gap between the median and what happened.</li>
-      <li><b>Repeating the last value</b> is the same error for a naive forecast. If the model doesn't beat it, it adds little.</li>
+      <li>The <b>naive guess</b> is the same error for a forecast that repeats the last cycle: the last day for hourly data, the last week for daily data, the last year for weekly, monthly or quarterly data, and the last value otherwise. If the model doesn't beat it, it adds little.</li>
+      <li><b>Scaled error</b> (MASE) divides the average error by the error a one-cycle-back guess makes on the history, so it compares across series. Under 1 is better than that guess.</li>
       <li><b>Inside the 80% range</b> should be near 80% when the model is honest about its uncertainty.</li>
       <li>With covariates selected, the page also runs the forecast without them and shows the change in error. They don't always help: on the bike data they lower the error in some weeks and raise it in others.</li>
+      <li>One start can be lucky. <b>Backtest every start</b> forecasts from each tick on the line, scores each window and pools them, with and without covariates when some are selected. Click a start in the table to look at it.</li>
     </ul>
     <p>
-      To use covariates past the end of your own data, add rows at the end with the covariates filled in and the
-      forecast columns left empty.
+      Each covariate is <b>known ahead</b> or past only. Known ahead, the model sees its values over the forecast, which
+      is right for a holiday calendar or a planned promotion. Past only, it sees just the history, which is right for
+      anything you measure as it happens, like the weather: in a backtest, giving the model the real future weather
+      would flatter it. To use known covariates past the end of your own data, add rows at the end with the covariates
+      filled in and the forecast columns left empty.
     </p>
+    <p>
+      CSV files can use commas, semicolons or tabs, and decimal commas. The time column can hold ISO dates, day-first
+      dates like 31/12/2025, or years. Rows are sorted by time, and rows without a valid time are left out.
+    </p>
+
+    <h2>Planning with the forecast</h2>
+    <ul>
+      <li><b>Plan</b> turns the forecast into numbers for the steps past the end of the data. Pick a service level, say 95%: the plan line on the chart is each step's 95% quantile, enough to cover that step's value 19 times out of 20. That is how much stock or staff to have when running short costs more than having a little spare.</li>
+      <li>The plan table adds up the next steps (or averages them, for levels like temperature): the most likely total, the 80% range and the plan, which here covers the whole period's total that often. The model forecasts each step, not the sum, and the sum depends on how the steps move together: if they all run high at once, the range is the sum of the steps' ranges; if they are independent, it is far narrower. So the page simulates 1,000 paths through each step's quantiles, linking consecutive steps as strongly as the forecast's errors were linked on the steps it can check since the forecast start (a Gaussian copula with that lag-1 correlation). With nothing to check yet, it assumes the steps move together, the widest case.</li>
+      <li><b>Scenario</b> asks “what if?” of covariates known ahead. Set one to a value, or change it by a percentage, over some of the next steps (a holiday on Friday, a promotion next week) and the page forecasts again with those values. The scenario median shows on the chart, and the plan table compares the totals.</li>
+      <li><b>Many series.</b> A file with one row per time and series, like sales by store or views by article, is a long table. The page finds the column that names the series, and you pick one to look at. <b>All series</b> forecasts every one from the end of its data with the same settings and ranks them by the change from the last period, the width of the 80% range, or the error from one horizon back.</li>
+      <li><b>Print report</b> lays out the chart, the plan, the scenario and the scores on a page; the print dialog can save it as a PDF. <b>Copy link</b> copies a link that reopens the same view: dataset, series, columns, start, service level and scenario. For your own file the link holds its name and settings, never the data, so whoever opens it needs the file too.</li>
+    </ul>
+
+    <h2>Anomalies and how a series changes</h2>
+    <ul>
+      <li><b>Anomalies</b> are points that fell outside the range a forecast gave them (98%, 90% or 80%), wherever a forecast can be checked against what happened: from the current start, and from every backtest start after <b>Scan more of the history</b>. They show as red circles on the timeline and in a list, most unusual first; click one to zoom to it. The page also says how many to expect by chance alone, about 2 in 100 for the 98% range, so a handful is normal. On the bike data the top ones are Christmas Eve and Thanksgiving evening.</li>
+      <li><b>Cycles</b> lays every day, week or year over the same axis. Older cycles fade, so you see the usual shape and how it drifts; <b>Replay</b> draws them one after another. The forecast's cycles past the end of the data come last, in blue with their 80% range, so you see where the shape goes next.</li>
+      <li><b>State space</b> plots each value against the one before it (or one cycle before). A steady series sits on the dashed diagonal; daily rhythms trace loops. Replay moves along the path through time, and the forecast continues it in blue, with each step's 80% range as a whisker.</li>
+    </ul>
 
     <h2>Limits and license</h2>
     <ul>

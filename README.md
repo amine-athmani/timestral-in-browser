@@ -4,6 +4,11 @@ A forecasting playground for [Timestral](https://mistral.ai/news/timestral/), Mi
 Pick an example or open a CSV, slide the forecast start back in time, and compare the forecast with what happened
 and with what comes next.
 
+It also helps plan with the forecast: choose a service level and read the totals for the next period, try
+"what if" scenarios on covariates you know ahead, forecast and rank every series of a long table (sales by store,
+views by article), flag anomalies, watch the series' cycles and state space replay with the forecast in them,
+print a report, or copy a link that reopens the same view.
+
 It runs two ways:
 
 - **Website (GitHub Pages):** the model runs in your browser with onnxruntime-web. Timestral-5M and 28M, nothing
@@ -32,7 +37,10 @@ them first (next section).
 cd web
 npm install
 npm run dev        # http://localhost:4321
+npm test           # unit tests for CSV parsing and scoring
 ```
+
+Pull requests run the unit tests and both site builds (`.github/workflows/ci.yml`).
 
 ## Export the models
 
@@ -69,6 +77,16 @@ Push to GitHub and set Settings → Pages → Source to **GitHub Actions**. Ever
 web/                    Astro site
   src/lib/timestral.js  JS port of the official forecast function
   src/lib/worker.js     runs the ONNX model in a Web Worker
+  src/lib/app.js        the workbench: state, forecasting and wiring
+  src/lib/data.js       CSV parsing, time column, series of a long table, seasonal cycle
+  src/lib/metrics.js    forecast scores and naive baselines
+  src/lib/plan.js       service level, simulated totals, scenarios, series outlook
+  src/lib/anomalies.js  points outside the forecast's range
+  src/lib/evolution.js  cycles and state-space views with replay
+  src/lib/settings.js   settings in the URL hash, for shareable links
+  src/lib/views.js      HTML for the result panels
+  src/lib/report.js     printable report
+  test/                 unit tests (node --test)
 server/                 FastAPI server for the Docker image
 scripts/                ONNX export and example datasets
 tests/parity/           browser forecaster vs. Python package

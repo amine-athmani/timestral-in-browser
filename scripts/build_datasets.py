@@ -8,6 +8,7 @@ column and horizon presets the page starts from). Run from the repo root:
 import io
 import json
 import zipfile
+from urllib.parse import quote
 from pathlib import Path
 
 import pandas as pd
@@ -45,6 +46,23 @@ def wikipedia():
     return pd.DataFrame({"Daily views": [i["views"] for i in items]}, index=idx).asfreq("D")
 
 
+LANGUAGES = {"Python": "Python_(programming_language)", "JavaScript": "JavaScript", "Java": "Java_(programming_language)",
+             "C++": "C++", "Rust": "Rust_(programming_language)", "Go": "Go_(programming_language)"}
+
+
+def languages():
+    # Long format: one row per day and article, the layout a sales export by store or product has.
+    frames = []
+    for name, article in LANGUAGES.items():
+        url = ("https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/"
+               f"{quote(article, safe='')}/daily/20240101/20260930")
+        items = json.loads(get(url))["items"]
+        idx = pd.to_datetime([i["timestamp"][:8] for i in items])
+        df = pd.DataFrame({"Daily views": [i["views"] for i in items]}, index=idx).asfreq("D")
+        frames.append(df.assign(Article=name)[["Article", "Daily views"]])
+    return pd.concat(frames)
+
+
 def weather():
     url = ("https://archive-api.open-meteo.com/v1/archive?latitude=48.85&longitude=2.35"
            "&start_date=2026-04-01&end_date=2026-09-30&hourly=temperature_2m,relative_humidity_2m&timezone=UTC")
@@ -76,6 +94,11 @@ EXAMPLES = [
     dict(id="wikipedia", load=wikipedia, horizon=56, title="Wikipedia views", freq="Daily",
          blurb="Daily views of the English Wikipedia article on Python, with a weekly rhythm and holiday dips.",
          source="Wikimedia Pageviews API", source_url="https://wikimedia.org/api/rest_v1/", license="CC0"),
+    dict(id="languages", load=languages, horizon=28, title="Language articles", freq="Daily, 6 series",
+         blurb="Daily views of six programming language articles on the English Wikipedia, one row per day and "
+               "article. Pick a series, or forecast all six and compare them.",
+         source="Wikimedia Pageviews API", source_url="https://wikimedia.org/api/rest_v1/", license="CC0",
+         group="Article", targets=["Daily views"]),
     dict(id="weather", load=weather, horizon=72, targets=["Temperature (°C)", "Humidity (%)"], title="Paris weather", freq="Hourly",
          blurb="Hourly temperature and humidity in Paris. Both columns are forecast together.",
          source="Open-Meteo", source_url="https://open-meteo.com/", license="CC BY 4.0"),
@@ -83,7 +106,8 @@ EXAMPLES = [
          blurb="Hourly bike rentals in Washington, D.C., in 2011 and 2012, with weather and holiday columns "
                "you can use as covariates.",
          source="UCI Machine Learning Repository", source_url="https://archive.ics.uci.edu/dataset/275/bike+sharing+dataset",
-         license="CC BY 4.0", covariates=["temp", "hum", "weathersit", "workingday", "holiday"]),
+         license="CC BY 4.0", covariates=["temp", "hum", "weathersit", "workingday", "holiday"],
+         known=["workingday", "holiday"]),  # weather is only measured as it happens
 ]
 
 
@@ -92,7 +116,8 @@ def main():
     index = []
     for ex in EXAMPLES:
         df = ex["load"]()
-        df = df.loc[df.first_valid_index():]
+        if "group" not in ex:  # long tables repeat each time once per series
+            df = df.loc[df.first_valid_index():]
         df.index.name = "time"
         fmt = "%Y-%m-%d %H:%M" if ex["freq"] == "Hourly" else "%Y-%m-%d"
         df.to_csv(OUT / f"{ex['id']}.csv", date_format=fmt, float_format="%.6g")

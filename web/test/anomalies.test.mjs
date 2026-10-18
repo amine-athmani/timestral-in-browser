@@ -21,10 +21,14 @@ test("a narrower range flags more points", () => {
   assert.equal(findAnomalies(w, 0.8).points.length, 2); // q10 = 60, q90 = 140: 145 and 55 are out
 });
 
-test("a row checked by two windows counts once", () => {
+test("a row checked by two windows counts once, judged by the shorter lead", () => {
   const a = { at: 0, actual: [[200, 100]], full: [[step, step]] };
   const b = { at: 1, actual: [[200]], full: [[step]] };
   const { points, checked } = findAnomalies([a, b], 0.98);
   assert.equal(checked, 2);
-  assert.deepEqual(points.map((p) => p.row), [0]);
+  // Row 1 is one step ahead in `a` but the first step of `b`, so b's value decides.
+  assert.deepEqual(points.map((p) => p.row), [0, 1]);
+  // The order of the windows does not change the result; on a tie the first window wins.
+  assert.deepEqual(findAnomalies([b, a], 0.98).points.map((p) => p.row).sort(), [0, 1]);
+  assert.deepEqual(findAnomalies([{ at: 0, actual: [[100]], full: [[step]] }, { at: 0, actual: [[200]], full: [[step]] }], 0.98).points, []);
 });
